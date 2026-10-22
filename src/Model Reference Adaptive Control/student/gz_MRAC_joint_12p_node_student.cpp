@@ -1,5 +1,5 @@
 // ============================================================================
-//  gz_MRAC_joint_12p_node_base.cpp
+//  gz_MRAC_joint_12p_node_student.cpp
 //  Control Adaptativo (MRAC / Slotine-Li) articular — 12 PARAMETROS
 //  OpenMANIPULATOR-X (Gazebo) — campana sim-to-real
 //  [Archivo base para estudiantes — Lab 7]
@@ -58,8 +58,8 @@
 //  (Graficar con plots_MRAC_joint_12p.m, mode='sim'.)
 //
 //  Ejemplos de uso:
-//    ros2 run open_manipulator_x_torque_control gz_mrac_joint_12p_node_base --ros-args -p adaptive:=true -p test_num:=1 -p t_run:=30.0
-//    ros2 run open_manipulator_x_torque_control gz_mrac_joint_12p_node_base --ros-args -p adaptive:=false -p test_num:=2 -p t_run:=30.0
+//    ros2 run open_manipulator_x_torque_control gz_mrac_joint_12p_node_student --ros-args -p adaptive:=true -p test_num:=1 -p t_run:=30.0
+//    ros2 run open_manipulator_x_torque_control gz_mrac_joint_12p_node_student --ros-args -p adaptive:=false -p test_num:=2 -p t_run:=30.0
 //
 //  ──────────────────────────────────────────────────────────────────────────
 //  SECCIONES A COMPLETAR:

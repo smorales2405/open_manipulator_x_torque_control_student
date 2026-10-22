@@ -92,59 +92,59 @@ target_compile_definitions(hw_io_control_node PRIVATE
 
 endif()  # FL_INSTR
 
-# ── gz_fl_control_node_base ──────────────────────────────────────────────────
-add_executable(gz_fl_control_node_base "${FL_STUD}/gz_fl_control_node_base.cpp")
-ament_target_dependencies(gz_fl_control_node_base rclcpp std_msgs sensor_msgs)
-target_link_libraries(gz_fl_control_node_base
+# ── gz_fl_control_node_student ───────────────────────────────────────────────
+add_executable(gz_fl_control_node_student "${FL_STUD}/gz_fl_control_node_student.cpp")
+ament_target_dependencies(gz_fl_control_node_student rclcpp std_msgs sensor_msgs)
+target_link_libraries(gz_fl_control_node_student
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(gz_fl_control_node_base PUBLIC cxx_std_17)
-target_compile_definitions(gz_fl_control_node_base PRIVATE
+target_compile_features(gz_fl_control_node_student PUBLIC cxx_std_17)
+target_compile_definitions(gz_fl_control_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   COAL_DISABLE_HPP_FCL_WARNINGS)
 
-# ── gz_io_control_node_base ──────────────────────────────────────────────────
-add_executable(gz_io_control_node_base "${FL_STUD}/gz_io_control_node_base.cpp")
-ament_target_dependencies(gz_io_control_node_base rclcpp std_msgs sensor_msgs)
-target_link_libraries(gz_io_control_node_base
+# ── gz_io_control_node_student ───────────────────────────────────────────────
+add_executable(gz_io_control_node_student "${FL_STUD}/gz_io_control_node_student.cpp")
+ament_target_dependencies(gz_io_control_node_student rclcpp std_msgs sensor_msgs)
+target_link_libraries(gz_io_control_node_student
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(gz_io_control_node_base PUBLIC cxx_std_17)
-target_compile_definitions(gz_io_control_node_base PRIVATE
+target_compile_features(gz_io_control_node_student PUBLIC cxx_std_17)
+target_compile_definitions(gz_io_control_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   COAL_DISABLE_HPP_FCL_WARNINGS)
 
-# ── hw_fl_control_node_base ──────────────────────────────────────────────────
-add_executable(hw_fl_control_node_base "${FL_STUD}/hw_fl_control_node_base.cpp")
-ament_target_dependencies(hw_fl_control_node_base rclcpp sensor_msgs)
-target_include_directories(hw_fl_control_node_base PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
-target_link_libraries(hw_fl_control_node_base
+# ── hw_fl_control_node_student ───────────────────────────────────────────────
+add_executable(hw_fl_control_node_student "${FL_STUD}/hw_fl_control_node_student.cpp")
+ament_target_dependencies(hw_fl_control_node_student rclcpp sensor_msgs)
+target_include_directories(hw_fl_control_node_student PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
+target_link_libraries(hw_fl_control_node_student
   ${dynamixel_sdk_LIBRARIES}
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(hw_fl_control_node_base PUBLIC cxx_std_17)
-target_compile_definitions(hw_fl_control_node_base PRIVATE
+target_compile_features(hw_fl_control_node_student PUBLIC cxx_std_17)
+target_compile_definitions(hw_fl_control_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   "PACKAGE_CONFIG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/config\""
   COAL_DISABLE_HPP_FCL_WARNINGS)
 
-# ── hw_io_control_node_base ──────────────────────────────────────────────────
-add_executable(hw_io_control_node_base "${FL_STUD}/hw_io_control_node_base.cpp")
-ament_target_dependencies(hw_io_control_node_base rclcpp sensor_msgs)
-target_include_directories(hw_io_control_node_base PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
-target_link_libraries(hw_io_control_node_base
+# ── hw_io_control_node_student ───────────────────────────────────────────────
+add_executable(hw_io_control_node_student "${FL_STUD}/hw_io_control_node_student.cpp")
+ament_target_dependencies(hw_io_control_node_student rclcpp sensor_msgs)
+target_include_directories(hw_io_control_node_student PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
+target_link_libraries(hw_io_control_node_student
   ${dynamixel_sdk_LIBRARIES}
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(hw_io_control_node_base PUBLIC cxx_std_17)
-target_compile_definitions(hw_io_control_node_base PRIVATE
+target_compile_features(hw_io_control_node_student PUBLIC cxx_std_17)
+target_compile_definitions(hw_io_control_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   "PACKAGE_CONFIG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/config\""
@@ -274,28 +274,28 @@ target_compile_definitions(gz_smc_cart_node PRIVATE
 
 endif()  # SMC_INSTR
 
-# ── gz_smc_joint_node_base (estudiantes) ───────────────────────────────────────
-add_executable(gz_smc_joint_node_base "${SMC_STUD}/gz_SMC_joint_node_base.cpp")
-ament_target_dependencies(gz_smc_joint_node_base rclcpp std_msgs sensor_msgs)
-target_link_libraries(gz_smc_joint_node_base
+# ── gz_smc_joint_node_student (estudiantes) ────────────────────────────────────
+add_executable(gz_smc_joint_node_student "${SMC_STUD}/gz_SMC_joint_node_student.cpp")
+ament_target_dependencies(gz_smc_joint_node_student rclcpp std_msgs sensor_msgs)
+target_link_libraries(gz_smc_joint_node_student
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(gz_smc_joint_node_base PUBLIC cxx_std_17)
-target_compile_definitions(gz_smc_joint_node_base PRIVATE
+target_compile_features(gz_smc_joint_node_student PUBLIC cxx_std_17)
+target_compile_definitions(gz_smc_joint_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   COAL_DISABLE_HPP_FCL_WARNINGS)
 
-# ── gz_smc_cart_node_base (estudiantes) ──────────────────────────────────────
-add_executable(gz_smc_cart_node_base "${SMC_STUD}/gz_SMC_cart_node_base.cpp")
-ament_target_dependencies(gz_smc_cart_node_base rclcpp std_msgs sensor_msgs)
-target_link_libraries(gz_smc_cart_node_base
+# ── gz_smc_cart_node_student (estudiantes) ───────────────────────────────────
+add_executable(gz_smc_cart_node_student "${SMC_STUD}/gz_SMC_cart_node_student.cpp")
+ament_target_dependencies(gz_smc_cart_node_student rclcpp std_msgs sensor_msgs)
+target_link_libraries(gz_smc_cart_node_student
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(gz_smc_cart_node_base PUBLIC cxx_std_17)
-target_compile_definitions(gz_smc_cart_node_base PRIVATE
+target_compile_features(gz_smc_cart_node_student PUBLIC cxx_std_17)
+target_compile_definitions(gz_smc_cart_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   COAL_DISABLE_HPP_FCL_WARNINGS)
@@ -335,33 +335,33 @@ target_compile_definitions(hw_smc_cart_node PRIVATE
 
 endif()  # SMC_INSTR
 
-# ── hw_smc_joint_node_base (estudiantes, SMC articular hw) ───────────────────
-add_executable(hw_smc_joint_node_base "${SMC_STUD}/hw_SMC_joint_node_base.cpp")
-ament_target_dependencies(hw_smc_joint_node_base rclcpp sensor_msgs)
-target_include_directories(hw_smc_joint_node_base PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
-target_link_libraries(hw_smc_joint_node_base
+# ── hw_smc_joint_node_student (estudiantes, SMC articular hw) ────────────────
+add_executable(hw_smc_joint_node_student "${SMC_STUD}/hw_SMC_joint_node_student.cpp")
+ament_target_dependencies(hw_smc_joint_node_student rclcpp sensor_msgs)
+target_include_directories(hw_smc_joint_node_student PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
+target_link_libraries(hw_smc_joint_node_student
   ${dynamixel_sdk_LIBRARIES}
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(hw_smc_joint_node_base PUBLIC cxx_std_17)
-target_compile_definitions(hw_smc_joint_node_base PRIVATE
+target_compile_features(hw_smc_joint_node_student PUBLIC cxx_std_17)
+target_compile_definitions(hw_smc_joint_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   "PACKAGE_CONFIG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/config\""
   COAL_DISABLE_HPP_FCL_WARNINGS)
 
-# ── hw_smc_cart_node_base (estudiantes, SMC/ISMC cartesiano hw) ──────────────
-add_executable(hw_smc_cart_node_base "${SMC_STUD}/hw_SMC_cart_node_base.cpp")
-ament_target_dependencies(hw_smc_cart_node_base rclcpp sensor_msgs)
-target_include_directories(hw_smc_cart_node_base PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
-target_link_libraries(hw_smc_cart_node_base
+# ── hw_smc_cart_node_student (estudiantes, SMC/ISMC cartesiano hw) ───────────
+add_executable(hw_smc_cart_node_student "${SMC_STUD}/hw_SMC_cart_node_student.cpp")
+ament_target_dependencies(hw_smc_cart_node_student rclcpp sensor_msgs)
+target_include_directories(hw_smc_cart_node_student PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
+target_link_libraries(hw_smc_cart_node_student
   ${dynamixel_sdk_LIBRARIES}
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(hw_smc_cart_node_base PUBLIC cxx_std_17)
-target_compile_definitions(hw_smc_cart_node_base PRIVATE
+target_compile_features(hw_smc_cart_node_student PUBLIC cxx_std_17)
+target_compile_definitions(hw_smc_cart_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   "PACKAGE_CONFIG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/config\""
@@ -431,30 +431,30 @@ target_compile_definitions(hw_mrac_joint_12p_node PRIVATE
 
 endif()  # MRAC_INSTR
 
-# ── gz_mrac_joint_12p_node_base (estudiantes, MRAC 12p sim) ──────────────────
-add_executable(gz_mrac_joint_12p_node_base "${MRAC_STUD}/gz_MRAC_joint_12p_node_base.cpp")
-ament_target_dependencies(gz_mrac_joint_12p_node_base rclcpp std_msgs sensor_msgs)
-target_link_libraries(gz_mrac_joint_12p_node_base
+# ── gz_mrac_joint_12p_node_student (estudiantes, MRAC 12p sim) ───────────────
+add_executable(gz_mrac_joint_12p_node_student "${MRAC_STUD}/gz_MRAC_joint_12p_node_student.cpp")
+ament_target_dependencies(gz_mrac_joint_12p_node_student rclcpp std_msgs sensor_msgs)
+target_link_libraries(gz_mrac_joint_12p_node_student
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(gz_mrac_joint_12p_node_base PUBLIC cxx_std_17)
-target_compile_definitions(gz_mrac_joint_12p_node_base PRIVATE
+target_compile_features(gz_mrac_joint_12p_node_student PUBLIC cxx_std_17)
+target_compile_definitions(gz_mrac_joint_12p_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   COAL_DISABLE_HPP_FCL_WARNINGS)
 
-# ── hw_mrac_joint_12p_node_base (estudiantes, MRAC 12p hw) ───────────────────
-add_executable(hw_mrac_joint_12p_node_base "${MRAC_STUD}/hw_MRAC_joint_12p_node_base.cpp")
-ament_target_dependencies(hw_mrac_joint_12p_node_base rclcpp sensor_msgs)
-target_include_directories(hw_mrac_joint_12p_node_base PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
-target_link_libraries(hw_mrac_joint_12p_node_base
+# ── hw_mrac_joint_12p_node_student (estudiantes, MRAC 12p hw) ────────────────
+add_executable(hw_mrac_joint_12p_node_student "${MRAC_STUD}/hw_MRAC_joint_12p_node_student.cpp")
+ament_target_dependencies(hw_mrac_joint_12p_node_student rclcpp sensor_msgs)
+target_include_directories(hw_mrac_joint_12p_node_student PRIVATE ${dynamixel_sdk_INCLUDE_DIRS})
+target_link_libraries(hw_mrac_joint_12p_node_student
   ${dynamixel_sdk_LIBRARIES}
   pinocchio::pinocchio_default
   pinocchio::pinocchio_parsers
   Eigen3::Eigen)
-target_compile_features(hw_mrac_joint_12p_node_base PUBLIC cxx_std_17)
-target_compile_definitions(hw_mrac_joint_12p_node_base PRIVATE
+target_compile_features(hw_mrac_joint_12p_node_student PUBLIC cxx_std_17)
+target_compile_definitions(hw_mrac_joint_12p_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\""
   "PACKAGE_CONFIG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/config\""
@@ -492,8 +492,8 @@ install(PROGRAMS
 set(OMX_NODES
     gz_fl_control_node gz_io_control_node
     hw_fl_control_node hw_io_control_node
-    gz_fl_control_node_base gz_io_control_node_base
-    hw_fl_control_node_base hw_io_control_node_base
+    gz_fl_control_node_student gz_io_control_node_student
+    hw_fl_control_node_student hw_io_control_node_student
     gz_tvlqr_node
     hw_tvlqr_node
     gz_gravity_comp_node
@@ -505,12 +505,12 @@ set(OMX_NODES
     hw_torque_probe_node
     gz_smc_joint_node gz_smc_cart_node gz_SMCI_cart_node
     hw_smc_joint_node hw_smc_cart_node hw_smci_cart_node
-    gz_smc_joint_node_base gz_smc_cart_node_base
-    hw_smc_joint_node_base hw_smc_cart_node_base
+    gz_smc_joint_node_student gz_smc_cart_node_student
+    hw_smc_joint_node_student hw_smc_cart_node_student
     gz_mrac_joint_12p_node
     hw_mrac_joint_12p_node
-    gz_mrac_joint_12p_node_base
-    hw_mrac_joint_12p_node_base
+    gz_mrac_joint_12p_node_student
+    hw_mrac_joint_12p_node_student
 )
 set(OMX_NODES_DEFINED "")
 foreach(_node IN LISTS OMX_NODES)

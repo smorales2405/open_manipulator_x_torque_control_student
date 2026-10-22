@@ -1,5 +1,5 @@
 // ============================================================================
-//  gz_io_control_node_base.cpp
+//  gz_io_control_node_student.cpp
 //  Plantilla: Controlador Input-Output Linearization — OpenMANIPULATOR-X (simulacion Gazebo)
 //
 //  Salida de tarea:
@@ -39,7 +39,7 @@
 //
 //  Ejemplo de ejecucion (con la simulacion Gazebo ya lanzada):
 //    ros2 launch open_manipulator_x_torque_control torque_sim.launch.py
-//    ros2 run open_manipulator_x_torque_control gz_io_control_node_base --ros-args -p test_num:=1 -p t_run:=15.0
+//    ros2 run open_manipulator_x_torque_control gz_io_control_node_student --ros-args -p test_num:=1 -p t_run:=15.0
 // ============================================================================
 
 #include <chrono>

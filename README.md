@@ -379,8 +379,8 @@ This launches `hw_fkin_node` together with `fkin_display_node.py`, which publish
 Implements computed-torque / feedback linearization control in joint space (**Activity 1**) and input-output linearization in Cartesian space (**Activity 2**). Uses Pinocchio for `M(q)` and `b(q, dq)`.
 
 > **Student files** (templates to complete):
-> `src/Feedback Linearization/student/gz_fl_control_node_base.cpp`,
-> `gz_io_control_node_base.cpp`, `hw_fl_control_node_base.cpp`, `hw_io_control_node_base.cpp`
+> `src/Feedback Linearization/student/gz_fl_control_node_student.cpp`,
+> `gz_io_control_node_student.cpp`, `hw_fl_control_node_student.cpp`, `hw_io_control_node_student.cpp`
 
 #### Activity 1 — Joint-space FL
 
@@ -388,11 +388,11 @@ Launch Gazebo first (Terminal 1), then in **Terminal 2**:
 
 ```bash
 # Simulation
-ros2 run open_manipulator_x_torque_control gz_fl_control_node_base \
+ros2 run open_manipulator_x_torque_control gz_fl_control_node_student \
     --ros-args -p test_num:=1 -p t_run:=20.0
 
 # Real hardware
-ros2 run open_manipulator_x_torque_control hw_fl_control_node_base \
+ros2 run open_manipulator_x_torque_control hw_fl_control_node_student \
     --ros-args -p log_id:=1 -p t_run:=20.0
 ```
 
@@ -415,11 +415,11 @@ EXPORT_FIGS = false; % true to save figures to plots/
 
 ```bash
 # Simulation
-ros2 run open_manipulator_x_torque_control gz_io_control_node_base \
+ros2 run open_manipulator_x_torque_control gz_io_control_node_student \
     --ros-args -p test_num:=1 -p t_run:=20.0
 
 # Real hardware
-ros2 run open_manipulator_x_torque_control hw_io_control_node_base \
+ros2 run open_manipulator_x_torque_control hw_io_control_node_student \
     --ros-args -p log_id:=1 -p t_run:=20.0
 ```
 
@@ -514,8 +514,8 @@ run('src/Trajectory Optimization TV-LQR/MATLAB/Lab5_Compare_Sim_Real.m')
 Implements SMC in joint space (**Activity 1**) and Cartesian space (**Activity 2**), both in Gazebo simulation only. The Xacro files support parametric uncertainty and end-effector load perturbation via `sim_init_config.yaml`.
 
 > **Student files** (templates to complete):
-> `src/Sliding Mode/student/gz_SMC_joint_node_base.cpp` (Activity 1),
-> `src/Sliding Mode/student/gz_SMC_cart_node_base.cpp` (Activity 2)
+> `src/Sliding Mode/student/gz_SMC_joint_node_student.cpp` (Activity 1),
+> `src/Sliding Mode/student/gz_SMC_cart_node_student.cpp` (Activity 2)
 
 #### Activity 1 — Joint-space SMC
 
@@ -523,11 +523,11 @@ Launch Gazebo first (Terminal 1), then in **Terminal 2**:
 
 ```bash
 # With sign(s) switching function
-ros2 run open_manipulator_x_torque_control gz_smc_joint_node_base \
+ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student \
     --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
 
 # With sat(s/phi) switching function
-ros2 run open_manipulator_x_torque_control gz_smc_joint_node_base \
+ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student \
     --ros-args -p rho_func:=sat -p phi:=0.05 -p test_num:=2 -p t_run:=20.0
 ```
 
@@ -568,11 +568,11 @@ Set `use_fixed_init: false` in `sim_init_config.yaml` so the robot starts at gra
 
 ```bash
 # With sign(s)
-ros2 run open_manipulator_x_torque_control gz_smc_cart_node_base \
+ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student \
     --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
 
 # With sat(s/phi)
-ros2 run open_manipulator_x_torque_control gz_smc_cart_node_base \
+ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student \
     --ros-args -p rho_func:=sat -p phi:=0.25 -p test_num:=2 -p t_run:=20.0
 ```
 

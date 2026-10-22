@@ -1,5 +1,5 @@
 // ============================================================================
-//  gz_SMC_cart_node_base.cpp
+//  gz_SMC_cart_node_student.cpp
 //  Control por Modo Deslizante en espacio cartesiano — OpenMANIPULATOR-X (Gazebo)
 //  [Archivo base para estudiantes — Lab 6, Actividad 2]
 //
@@ -53,9 +53,9 @@
 //
 //  Ejemplos de uso:
 //
-//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_base --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
+//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
 //
-//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_base --ros-args -p rho_func:=sat -p phi:=0.15 -p test_num:=2 -p t_run:=20.0
+//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student --ros-args -p rho_func:=sat -p phi:=0.15 -p test_num:=2 -p t_run:=20.0
 //
 //  ──────────────────────────────────────────────────────────────────────────
 //  SECCIONES A COMPLETAR:

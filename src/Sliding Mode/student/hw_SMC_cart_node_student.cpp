@@ -1,5 +1,5 @@
 /*
- * hw_SMC_cart_node_base.cpp
+ * hw_SMC_cart_node_student.cpp
  * Control por Modo Deslizante en espacio cartesiano — OpenMANIPULATOR-X
  * hardware real vía Dynamixel SDK directo, sin ros2_control.
  * [Archivo base para estudiantes — Lab 6, implementacion]
@@ -137,11 +137,11 @@
  * Ejemplos de ejecucion (primer run SIEMPRE con gain_scale:=0.5 y el brazo
  * pre-posicionado a mano cerca de Y_START):
  *   # SMC clasico:
- *   ros2 run open_manipulator_x_torque_control hw_smc_cart_node_base \
+ *   ros2 run open_manipulator_x_torque_control hw_smc_cart_node_student \
  *     --ros-args -p gain_scale:=0.5 -p rho_func:=sat -p test_num:=1 -p t_run:=30.0
  *
  *   # ISMC (termino integral habilitado; phi en unidades de POSICION):
- *   ros2 run open_manipulator_x_torque_control hw_smc_cart_node_base \
+ *   ros2 run open_manipulator_x_torque_control hw_smc_cart_node_student \
  *     --ros-args -p use_integral:=true -p phi:=0.02 -p rho_func:=sat \
  *     -p test_num:=2 -p t_run:=30.0
  *

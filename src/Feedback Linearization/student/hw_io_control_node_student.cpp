@@ -1,5 +1,5 @@
 /*
- * hw_io_control_node_base.cpp
+ * hw_io_control_node_student.cpp
  * Plantilla: Controlador Input-Output Linearization cartesiana
  * OpenMANIPULATOR-X hardware real via Dynamixel SDK directo.
  *
@@ -58,7 +58,7 @@
  *   motor_epsilon_friction [double]      rad/s
  *
  * Ejemplo de ejecucion:
- *   ros2 run open_manipulator_x_torque_control hw_io_control_node_base \
+ *   ros2 run open_manipulator_x_torque_control hw_io_control_node_student \
  *     --ros-args -p gain_scale:=1.0 -p log_id:=1 -p t_run:=20.0
  */
 

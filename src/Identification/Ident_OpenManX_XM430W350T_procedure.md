@@ -397,7 +397,7 @@ del árbol fuente).
 
 El modelo completo se valida con un controlador que lo use. En el curso es el
 laboratorio de Feedback Linearization (cada alumno con su
-`hw_fl_control_node_base` ya completado); el instructor puede usar el nodo de
+`hw_fl_control_node_student` ya completado); el instructor puede usar el nodo de
 referencia:
 
 ```bash

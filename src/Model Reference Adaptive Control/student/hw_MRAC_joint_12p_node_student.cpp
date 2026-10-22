@@ -1,5 +1,5 @@
 /*
- * hw_MRAC_joint_12p_node_base.cpp
+ * hw_MRAC_joint_12p_node_student.cpp
  * Control Adaptativo (MRAC / Slotine-Li) articular de 12 PARAMETROS —
  * OpenMANIPULATOR-X hardware real via Dynamixel SDK directo, sin ros2_control.
  * [Archivo base para estudiantes — Lab 7]
@@ -79,9 +79,9 @@
  * (columnas compatibles con plots_MRAC_joint_12p.m, mode='real', + extras hw)
  *
  * Ejemplos de ejecucion:
- *   ros2 run open_manipulator_x_torque_control hw_mrac_joint_12p_node_base \
+ *   ros2 run open_manipulator_x_torque_control hw_mrac_joint_12p_node_student \
  *     --ros-args -p adaptive:=false -p test_num:=1 -p t_run:=30.0 -p traj_scale:=0.7
- *   ros2 run open_manipulator_x_torque_control hw_mrac_joint_12p_node_base \
+ *   ros2 run open_manipulator_x_torque_control hw_mrac_joint_12p_node_student \
  *     --ros-args -p adaptive:=true -p test_num:=2 -p t_run:=30.0
  *
  * ADVERTENCIA: No ejecutar junto a hardware.launch.py ni ningun proceso que
@@ -176,7 +176,7 @@ static constexpr double T_RAMP      = 2.0;
 static constexpr double SETTLE_TOL  = 0.08;
 static constexpr double SETTLE_TMAX = 5.0;
 
-// Fase de retorno final (como hw_fl_control_node_base): al completar RUN, en
+// Fase de retorno final (como hw_fl_control_node_student): al completar RUN, en
 // vez de cortar corriente de golpe en medio del multiseno, el nodo hace una
 // transicion quintica hasta el reposo en q_inicial (pose medida en el primer
 // tick, antes de HOMING) + una pausa antes de cortar. El CSV NO registra el
