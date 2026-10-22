@@ -98,11 +98,12 @@ Por qué cada parámetro exige SU método:
    volumen de trabajo, gripper montado (las masas del URDF lo incluyen).
    Alimentación 12 V estable y U2D2/USB conectado (`/dev/ttyUSB0`).
 
-3. **Latencia del FTDI a 1 ms** (necesario para lazos ≥100 Hz; repetir tras
-   reconectar el USB):
+3. **Latencia del FTDI a 1 ms** (necesario para lazos ≥100 Hz). Instalar una sola
+   vez por PC la regla udev de ROBOTIS, que la fija en cada conexión del U2D2
+   (persiste al reconectar el USB y al reiniciar):
 
    ```bash
-   echo 1 | sudo tee /sys/bus/usb-serial/devices/ttyUSB0/latency_timer
+   ros2 run open_manipulator_x_bringup create_udev_rules   # una vez por PC (pide sudo)
    cat /sys/bus/usb-serial/devices/ttyUSB0/latency_timer   # debe imprimir 1
    ```
 

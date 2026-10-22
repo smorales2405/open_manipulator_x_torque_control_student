@@ -598,16 +598,24 @@ run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_cart.m')
 
 ## Real Hardware — USB Latency
 
-The OpenManipulator-X communicates via a USB-to-RS485 adapter. Reducing the USB port latency improves control loop timing significantly.
+The OpenManipulator-X communicates via a USB-to-RS485 adapter (U2D2). Reducing the USB port latency improves control loop timing significantly.
 
-**Each time the robot is connected**, check the assigned port and reduce its latency:
+**Once per computer**, install the udev rule provided by ROBOTIS (it asks for your `sudo` password):
+
+```bash
+ros2 run open_manipulator_x_bringup create_udev_rules
+```
+
+The rule (`/etc/udev/rules.d/99-open-manipulator-cdc.rules`) sets the latency timer to 1 ms (default is 16 ms) and gives read/write access to the port. It is applied immediately and again every time the robot is connected, so it persists across reconnections and reboots.
+
+To verify, with the robot connected:
 
 ```bash
 # Verify the USB port
 ls /dev/ttyUSB*
 
-# Reduce latency timer to 1 ms (default is 16 ms)
-echo 1 | sudo tee /sys/bus/usb-serial/devices/ttyUSB0/latency_timer
+# Must print 1
+cat /sys/bus/usb-serial/devices/ttyUSB0/latency_timer
 ```
 
 If the robot is not at `/dev/ttyUSB0`, replace `ttyUSB0` with the correct port number.
