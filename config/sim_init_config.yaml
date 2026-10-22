@@ -1,0 +1,91 @@
+# ─── Configuracion de posicion inicial del robot en simulacion Gazebo ────────
+#
+# use_fixed_init: false → el robot inicia en equilibrio bajo gravedad sin torques
+#                          (comportamiento por defecto)
+#                 true  → el robot inicia en la posicion articular q_init
+#
+# q_init [rad]: [q1, q2, q3, q4]
+#   Solo se aplica si use_fixed_init: true.
+#   El controlador de esfuerzo debe compensar la gravedad en esa posicion.
+#
+# ─── Configuraciones de referencia ───────────────────────────────────────────
+#   Equilibrio gravedad : use_fixed_init: false   (q_init ignorado)
+#   Home (todos cero)  : use_fixed_init: true    q_init: [0.0, 0.0, 0.0, 0.0]
+
+use_fixed_init: true
+q_init: [0.0, 0.91, 0.54, -1.68]           # Lab 4, 6, 7: Posicion articular inicial
+#q_init: [1.5708, 0.0, 0.5236, 1.0472]     # Lab 5 TV-LQR: Posicion articular inicial
+
+# ─── Obstáculo MDF ───────────────────────────────────────────────────────────
+#
+# spawn_obstacle: true  → spawnea el obstáculo tipo arco/mesa de MDF en Gazebo
+#                false  → sin obstáculo (comportamiento por defecto)
+#
+# obstacle_pose: [x, y, z, roll, pitch, yaw]  (metros / radianes, marco world)
+#   El STL está en mm → scale 0.001 aplicada internamente.
+#   Origen del STL: centrado en X/Y, fondo de la pieza en Z=0.
+#   Con z=0 la pieza apoya directamente en el suelo de Gazebo.
+#   Punto de partida: obstáculo a 0.16 m en +X, frente al espacio de trabajo.
+
+spawn_obstacle: false
+obstacle_pose: [0.1125, 0.0, 0.0, 0.0, 0.0, 1.5708]
+
+# ─── Escalas de dinamica ─────────────────────────────────────────────────────
+#
+# mass_inertia_scale : factor multiplicativo aplicado a masas e inercias de
+#                      link1..link5 (gripper links no se ven afectados).
+#                      1.0 = valores nominales calibrados.
+#                      >1  = robot mas pesado/lento  |  <1 = mas ligero.
+#
+# damping_scale      : factor multiplicativo aplicado al parametro damping
+#                      de joint1..joint4.
+#                      1.0 = damping nominal identificado.
+#                      0.0 = sin damping  |  >1 = mayor amortiguamiento.
+#
+# friction_scale     : factor multiplicativo aplicado al parametro friction
+#                      de joint1..joint4.
+#                      1.0 = friccion nominal identificada.
+#                      0.0 = sin friccion  |  >1 = mayor friccion.
+#
+# Rango tipico de uso:
+#   Sin friccion/damping : damping_scale: 0.0  friction_scale: 0.0
+#   Modelo nominal       : mass_inertia_scale: 1.0  damping_scale: 1.0  friction_scale: 1.0
+#   Perturbacion de masa : mass_inertia_scale: 1.5
+
+# MRAC 12p — C1 gemelo digital: 1.0/1.0/1.0 (friccion Coulomb ENCENDIDA).
+#   C2: friction/damping en {0.5, 1.5} | C3: ej. 1.1/1.3/0.7
+# Act2 MRAC 8p usa: mass 1.2, damping 1.1, friction 0.0 (restaurar para ese lab).
+# Lab6 SMC (los nodos compensan la friccion del URDF con feedforward):
+#   Parte A nominal        : 1.0 / 1.0 / 1.0
+#   Parte B inc. parametrica: 1.2 / 1.1 / 1.0
+#   Parte C carga adicional : 1.0 / 1.0 / 1.0 + spawn_load: true
+mass_inertia_scale: 1.0
+damping_scale: 1.0
+friction_scale: 1.0
+
+# ─── Carga en el efector final ───────────────────────────────────────────────
+#
+# spawn_load  : true  → cilindro dorado fijo en end_effector_link (visual + colision + masa)
+#               false → sin carga, no afecta la simulacion (comportamiento por defecto)
+#
+# load_radius   : radio del cilindro [m]
+# load_height   : altura del cilindro [m]
+# load_mass     : masa del cilindro [kg]
+# load_x_offset : desplazamiento del centro del cilindro en el eje X del efector [m]
+#
+# El cilindro va con su EJE a lo largo del eje Z del efector (caras planas
+# arriba/abajo): el gripper lo sostiene alrededor de su DIAMETRO, como el
+# robot real. El launch ajusta los dedos automaticamente a esa medida
+# (gripper_init = load_radius - 0.021; con r=0.019 → -0.002, dedos cerrados
+# a 38 mm; limites fisicos del joint [-0.010, 0.019] → radio agarrable
+# entre 0.011 y 0.040 m).
+#
+# Verdad de theta_load para el nodo MRAC 12p (EE a 0.126 m de joint4):
+#   dm = load_mass ;  dmcx = load_mass * (0.126 + load_x_offset)
+#   Con 0.125 kg y offset 0.0 → theta_load = [0.125, 0.0158, 0, 0]
+
+spawn_load:    false
+load_radius:   0.019     # [m]
+load_height:   0.013    # [m]
+load_mass:     0.125    # [kg]
+load_x_offset: 0.0      # [m]

@@ -1,0 +1,318 @@
+<?xml version="1.0"?>
+<!--
+  open_manipulator_x.urdf.xacro
+  Copia local de open_manipulator_x_description/urdf/open_manipulator_x.urdf.xacro
+  con propiedades inerciales actualizadas desde mediciones reales de masa (balanza)
+  y tensores de inercia de Autodesk Inventor CAD escalados por m_real/m_CAD.
+
+  Cambios respecto al original del paquete de descripcion:
+    - link1-link5 : masa/CoG/tensor medidos fisicamente + Inventor (m_real/m_CAD)
+    - joint4      : limites actualizados a [-1.8, 2.1] rad
+    - gripper_right_joint: damping 0.1 -> 0.7 (igual que ROBOTIS URDF oficial)
+
+  Parametros de escala (configurables desde sim_init_config.yaml):
+    mass_inertia_scale : factor multiplicativo para masas e inercias de link1..link5
+    damping_scale      : factor multiplicativo para damping de joint1..joint4
+    friction_scale     : factor multiplicativo para friction de joint1..joint4
+
+  Cambios adicionales:
+    - Meshes: ahora se cargan desde este mismo paquete (meshes/), ya no desde open_manipulator_x_description
+
+  Sin cambios:
+    - Origenes y ejes articulares
+    - Gripper links inertial (masa dummy)
+    - Estructura dummy_mimic_fix
+-->
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="open_manipulator_x"
+               params="prefix='' mass_inertia_scale='1.0' damping_scale='1.0' friction_scale='1.0'">
+
+    <xacro:property
+      name="meshes_file_direction"
+      value="package://open_manipulator_x_torque_control/meshes"/>
+
+    <!-- Friccion articular: leida desde config/motorXM430W350T_params.yaml
+         (identificacion torque->corriente del robot real via
+         src/Identification/Ident_OpenManX_XM430W350T_procedure.md), en
+         dominio de torque: Fv = motor_Fv/motor_alpha [N·m·s/rad],
+         Fc = motor_Fc/motor_alpha [N·m]. Evita duplicar a mano estos 8
+         numeros (ver tambien urdf/open_manipulator_x.urdf — snapshot
+         estatico que usan los nodos C++/Pinocchio directamente y debe
+         actualizarse por separado tras cada re-identificacion — y
+         gz_MRAC_joint_12p_node.cpp). -->
+    <xacro:property name="_motor_cfg_path"
+      value="$(find open_manipulator_x_torque_control)/config/motorXM430W350T_params.yaml"/>
+    <xacro:property name="_motor_cfg"
+      value="${xacro.load_yaml(_motor_cfg_path)['/**']['ros__parameters']}"/>
+    <xacro:property name="_fv1" value="${_motor_cfg['motor_Fv'][0] / _motor_cfg['motor_alpha'][0]}"/>
+    <xacro:property name="_fv2" value="${_motor_cfg['motor_Fv'][1] / _motor_cfg['motor_alpha'][1]}"/>
+    <xacro:property name="_fv3" value="${_motor_cfg['motor_Fv'][2] / _motor_cfg['motor_alpha'][2]}"/>
+    <xacro:property name="_fv4" value="${_motor_cfg['motor_Fv'][3] / _motor_cfg['motor_alpha'][3]}"/>
+    <xacro:property name="_fc1" value="${_motor_cfg['motor_Fc'][0] / _motor_cfg['motor_alpha'][0]}"/>
+    <xacro:property name="_fc2" value="${_motor_cfg['motor_Fc'][1] / _motor_cfg['motor_alpha'][1]}"/>
+    <xacro:property name="_fc3" value="${_motor_cfg['motor_Fc'][2] / _motor_cfg['motor_alpha'][2]}"/>
+    <xacro:property name="_fc4" value="${_motor_cfg['motor_Fc'][3] / _motor_cfg['motor_alpha'][3]}"/>
+
+    <link name="${prefix}link1">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link1.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link1.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <!-- link1 — balanza + Inventor CAD (escalado m_real/m_CAD) -->
+      <inertial>
+        <origin xyz="0.000308 0.000000 0.017927" rpy="0 0 0"/>
+        <mass value="${0.0804 * mass_inertia_scale}" />
+        <inertia ixx="${1.275713e-05 * mass_inertia_scale}" ixy="0.000000e+00" ixz="${-1.794293e-07 * mass_inertia_scale}"
+                 iyy="${2.234728e-05 * mass_inertia_scale}" iyz="0.000000e+00"
+                 izz="${1.965878e-05 * mass_inertia_scale}" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}joint1" type="revolute">
+      <parent link="${prefix}link1"/>
+      <child link="${prefix}link2"/>
+      <origin xyz="0.012 0.0 0.017" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit velocity="4.8" effort="1.5" lower="${-3*pi/4}" upper="${3*pi/4}" />
+      <dynamics damping="${_fv1 * damping_scale}" friction="${_fc1 * friction_scale}"/>
+    </joint>
+
+    <link name="${prefix}link2">
+      <visual>
+        <origin xyz="0 0 0.019" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link2.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0.019" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link2.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <!-- link2 — balanza + Inventor CAD (escalado m_real/m_CAD) -->
+      <inertial>
+        <origin xyz="0.000000 0.000657 0.044319" rpy="0 0 0"/>
+        <mass value="${0.0970 * mass_inertia_scale}" />
+        <inertia ixx="${3.078317e-05 * mass_inertia_scale}" ixy="0.000000e+00" ixz="0.000000e+00"
+                 iyy="${2.670366e-05 * mass_inertia_scale}" iyz="${-1.289659e-07 * mass_inertia_scale}"
+                 izz="${1.627175e-05 * mass_inertia_scale}" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}joint2" type="revolute">
+      <parent link="${prefix}link2"/>
+      <child link="${prefix}link3"/>
+      <origin xyz="0.0 0.0 0.0595" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit velocity="4.8" effort="1.5" lower="${-11*pi/18}" upper="${5*pi/9}" />
+      <dynamics damping="${_fv2 * damping_scale}" friction="${_fc2 * friction_scale}"/>
+    </joint>
+
+    <link name="${prefix}link3">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link3.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link3.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <!-- link3 — balanza + Inventor CAD (escalado m_real/m_CAD) -->
+      <inertial>
+        <origin xyz="0.007606 0.000389 0.099924" rpy="0 0 0"/>
+        <mass value="${0.1235 * mass_inertia_scale}" />
+        <inertia ixx="${1.979680e-04 * mass_inertia_scale}" ixy="${-2.511443e-07 * mass_inertia_scale}" ixz="${-2.497601e-05 * mass_inertia_scale}"
+                 iyy="${2.046627e-04 * mass_inertia_scale}" iyz="${-1.351040e-06 * mass_inertia_scale}"
+                 izz="${3.374865e-05 * mass_inertia_scale}" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}joint3" type="revolute">
+      <parent link="${prefix}link3"/>
+      <child link="${prefix}link4"/>
+      <origin xyz="0.024 0 0.128" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit velocity="4.8" effort="1.5" lower="${-11*pi/18}" upper="${pi/2}" />
+      <dynamics damping="${_fv3 * damping_scale}" friction="${_fc3 * friction_scale}"/>
+    </joint>
+
+    <link name="${prefix}link4">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link4.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link4.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <!-- link4 — balanza + Inventor CAD (escalado m_real/m_CAD) -->
+      <inertial>
+        <origin xyz="0.089168 0.000437 0.000001" rpy="0 0 0"/>
+        <mass value="${0.1151 * mass_inertia_scale}" />
+        <inertia ixx="${1.930305e-05 * mass_inertia_scale}" ixy="${-1.189078e-06 * mass_inertia_scale}" ixz="${3.461654e-09 * mass_inertia_scale}"
+                 iyy="${1.483284e-04 * mass_inertia_scale}" iyz="0.000000e+00"
+                 izz="${1.547550e-04 * mass_inertia_scale}" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}joint4" type="revolute">
+      <parent link="${prefix}link4"/>
+      <child link="${prefix}link5"/>
+      <origin xyz="0.124 0.0 0.0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit velocity="4.8" effort="1.5" lower="-1.8" upper="2.1" />
+      <dynamics damping="${_fv4 * damping_scale}" friction="${_fc4 * friction_scale}"/>
+    </joint>
+
+    <link name="${prefix}link5">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link5.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link5.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <!-- link5 — balanza + Inventor CAD (escalado m_real/m_CAD) -->
+      <inertial>
+        <origin xyz="0.062451 0.000000 0.005878" rpy="0 0 0"/>
+        <mass value="${0.2206 * mass_inertia_scale}" />
+        <inertia ixx="${1.344328e-04 * mass_inertia_scale}" ixy="${-1.788649e-08 * mass_inertia_scale}" ixz="${2.259163e-05 * mass_inertia_scale}"
+                 iyy="${1.892619e-04 * mass_inertia_scale}" iyz="${9.936937e-07 * mass_inertia_scale}"
+                 izz="${2.174510e-04 * mass_inertia_scale}" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}gripper_left_joint" type="prismatic">
+      <parent link="${prefix}link5"/>
+      <child link="${prefix}gripper_left_link"/>
+      <origin xyz="0.0817 0.021 0.0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit velocity="4.8" effort="1" lower="-0.010" upper="0.019" />
+      <dynamics damping="0.1"/>
+    </joint>
+
+    <link name="${prefix}gripper_left_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/gripper_left_palm.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/gripper_left_palm.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" />
+        <mass value="1.0e-03" />
+        <inertia ixx="1.0e-06" ixy="0.0" ixz="0.0"
+                 iyy="1.0e-06" iyz="0.0"
+                 izz="1.0e-06" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}gripper_right_joint_mimic" type="fixed">
+      <parent link="${prefix}gripper_right_link" />
+      <child link="dummy_mimic_fix" />
+    </joint>
+    <link name="dummy_mimic_fix"/>
+
+    <!-- damping=0.7 (ROBOTIS oficial URDF) — dedos mimic mas amortiguados -->
+    <joint name="${prefix}gripper_right_joint" type="prismatic">
+      <parent link="${prefix}link5"/>
+      <child link="${prefix}gripper_right_link"/>
+      <origin xyz="0.0817 -0.021 0" rpy="0 0 0"/>
+      <axis xyz="0 -1 0"/>
+      <limit velocity="4.8" effort="1" lower="-0.010" upper="0.019" />
+      <mimic joint="${prefix}gripper_left_joint" multiplier="1"/>
+      <dynamics damping="0.7"/>
+    </joint>
+
+    <link name="${prefix}gripper_right_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/gripper_right_palm.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/gripper_right_palm.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" />
+        <mass value="1.0e-03" />
+        <inertia ixx="1.0e-06" ixy="0.0" ixz="0.0"
+                 iyy="1.0e-06" iyz="0.0"
+                 izz="1.0e-06" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}end_effector_joint" type="fixed">
+      <parent link="${prefix}link5"/>
+      <child link="${prefix}end_effector_link"/>
+      <origin xyz="0.126 0.0 0.0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${prefix}end_effector_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.01 0.01 0.01" />
+        </geometry>
+        <material name="red"/>
+      </visual>
+    </link>
+
+  </xacro:macro>
+
+</robot>
