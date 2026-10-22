@@ -18,11 +18,11 @@ clear; clc; close all;
 mode        = 'real';   % 'sim'  = simulacion Gazebo
                        % 'real' = implementacion hardware real
 
-test_num    = 7;       % Numero de log
+test_num    = 1;       % Numero de log
 
 act_num     = 1;       % Actividad (1 o 2): subcarpeta act<act_num> en data/ y plots/
 
-EXPORT_FIGS = true;   % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
+EXPORT_FIGS = false;   % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
                        % false = solo visualizar
 
 % Directorio raiz del paquete ROS 2

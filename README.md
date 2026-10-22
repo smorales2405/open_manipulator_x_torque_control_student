@@ -536,7 +536,7 @@ ros2 run open_manipulator_x_torque_control gz_smc_joint_node_base \
 | `rho_func` | Switching function: `sign` or `sat` |
 | `phi` | Boundary layer width (only used when `rho_func:=sat`) |
 | `test_num` | ID appended to output CSV |
-| `t_sim` | Simulation duration in seconds |
+| `t_run` | Simulation duration in seconds |
 
 Data saved to: `data/lab6/sim/act1/gz_smc_joint_<rho>_<N>.csv`
 
@@ -562,7 +562,7 @@ run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_joint.m')
 
 #### Activity 2 — Cartesian SMC
 
-The node performs a quintic transition of duration `T_trans = 3 s` before the SMC phase. `t_sim` refers only to the SMC phase; total runtime = `T_trans + t_sim`.
+The node performs a quintic transition of duration `T_trans = 3 s` before the SMC phase. `t_run` refers only to the SMC phase; total runtime = `T_trans + t_run`.
 
 Set `use_fixed_init: false` in `sim_init_config.yaml` so the robot starts at gravity equilibrium.
 
