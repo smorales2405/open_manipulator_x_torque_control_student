@@ -30,7 +30,10 @@
 //    - Captura automatica de la pose inicial del robot
 //    - Suscriptor /joint_states  →  q, dq
 //    - Publicador /arm_effort_controller/commands  →  tau
-//    - Escritura de CSV:  gz_io_data_<test_num>.csv
+//    - Retorno suave (5to orden) a la pose inicial al cumplirse t_run + pausa
+//      en reposo antes de soltar el torque: el robot queda en la pose de
+//      partida y el nodo se puede volver a ejecutar sobre el mismo Gazebo
+//    - Escritura de CSV:  gz_io_data_<test_num>.csv (sin el retorno final)
 //    - Timer de control a 100 Hz
 //    - Parametros ROS:  test_num, t_run
 //
@@ -79,6 +82,11 @@ static constexpr char EFF_FRAME[] = "end_effector_link";
 // (usa la velocidad DESEADA, senal sin ruido: eps pequeno es seguro)
 static constexpr double FRIC_EPS = 0.05;
 
+// Duracion del retorno final a la pose inicial y de la pausa en reposo antes
+// de soltar el torque [s] (infraestructura)
+static constexpr double RETURN_TIME_S = 3.0;
+static constexpr double HOLD_TIME_S   = 0.5;
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  SECCION 1 — TRAYECTORIA DE REFERENCIA CARTESIANA
 //
@@ -96,7 +104,7 @@ static constexpr double FRIC_EPS = 0.05;
 //    T_TRANS — duracion de la fase de transicion inicial [s]
 // ═══════════════════════════════════════════════════════════════════════════
 
-static constexpr double T_TRANS   = 2.0;    // duracion de la transicion inicial  [s]
+static constexpr double T_TRANS   = 3.0;    // duracion de la transicion inicial  [s]
 static const Eigen::Vector4d Y_START {0.0, 0.0, 0.0, 0.0};  // COMPLETAR 1b  [x, y, z, phi]
 
 // ── Estructura de referencia cartesiana ─────────────────────────────────────
@@ -367,13 +375,27 @@ private:
     }
 
     // ── 6. Referencia segun fase ──────────────────────────────────────────
-    // [0, T_TRANS): transicion suave desde la pose inicial hasta Y_START
-    // [T_TRANS, ∞): trayectoria definida en circularTrajectory()
+    // [0, T_TRANS)                  : transicion suave desde la pose inicial hasta Y_START
+    // [T_TRANS, t_run)              : trayectoria definida en circularTrajectory()
+    // [t_run, t_run+RETURN_TIME_S)  : retorno suave a la pose inicial y0
+    // [t_run+RETURN_TIME_S, ...)    : pausa en reposo en y0 (luego torque cero)
     CartRef ref;
     if (t_ < T_TRANS) {
       ref = transitionTrajectory(t_, y0_, Y_START, T_TRANS);
-    } else {
+    } else if (t_run_ <= 0.0 || t_ < t_run_) {
       ref = circularTrajectory(t_ - T_TRANS);
+    } else if (t_ < t_run_ + RETURN_TIME_S) {
+      if (!return_logged_) {
+        RCLCPP_INFO(this->get_logger(),
+          "Iniciando retorno cartesiano a y_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
+        return_logged_ = true;
+      }
+      const Eigen::Vector4d y_at_trun = circularTrajectory(t_run_ - T_TRANS).y;
+      ref = transitionTrajectory(t_ - t_run_, y_at_trun, y0_, RETURN_TIME_S);
+    } else {
+      ref.y = y0_;
+      ref.ydot.setZero();
+      ref.yddot.setZero();
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -428,14 +450,17 @@ private:
     cmd.data.assign(tau_sat.data(), tau_sat.data() + NARM);
     torque_pub_->publish(cmd);
 
-    const char * phase = (t_ < T_TRANS) ? "TRANS" : "CIRC ";
+    const char * phase = (t_ < T_TRANS) ? "TRANS" :
+                         (t_run_ <= 0.0 || t_ < t_run_) ? "CIRC " :
+                         (t_ < t_run_ + RETURN_TIME_S)  ? "RET  " : "HOME ";
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
       "[%s] t=%.2fs  y=[%.3f %.3f %.3f %.3f]  tau=[%.3f %.3f %.3f %.3f]",
       phase, t_, y[0], y[1], y[2], y[3],
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
-    // ── 8. CSV ────────────────────────────────────────────────────────────
-    if (csv_.is_open()) {
+    // ── 8. CSV (excluye el retorno final y la pausa en reposo) ────────────
+    const bool in_return_or_hold = (t_run_ > 0.0 && t_ >= t_run_);
+    if (csv_.is_open() && !in_return_or_hold) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
            << ',' << q[0]           << ',' << q[1]           << ',' << q[2]           << ',' << q[3]
@@ -449,10 +474,11 @@ private:
 
     t_ += 0.01;
 
-    // ── 9. Detener al cumplirse el tiempo de simulacion ───────────────────
-    if (t_run_ > 0.0 && t_ >= t_run_) {
+    // ── 9. Fin: tras el retorno y la pausa se suelta el torque (el robot ──
+    //       queda en la pose de partida, listo para otra ejecucion)
+    if (t_run_ > 0.0 && t_ >= t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
       RCLCPP_INFO(this->get_logger(),
-        "Simulacion completada (%.1f s). Deteniendo control.", t_run_);
+        "Retorno a y_inicial completado (t=%.1f s). Deteniendo control.", t_);
       std_msgs::msg::Float64MultiArray zero;
       zero.data.assign(NARM, 0.0);
       torque_pub_->publish(zero);
@@ -477,6 +503,7 @@ private:
 
   Eigen::Vector4d y0_;           // pose cartesiana inicial capturada
   bool            y0_initialized_;
+  bool            return_logged_{false};
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  joint_sub_;

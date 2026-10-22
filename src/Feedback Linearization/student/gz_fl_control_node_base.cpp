@@ -19,7 +19,12 @@
 //      pero Gazebo SI simula esa friccion; se compensa como infraestructura
 //    - Suscriptor /joint_states  →  q, dq
 //    - Publicador /arm_effort_controller/commands  →  tau
-//    - Escritura de CSV:  fl_data_<test_num>.csv
+//    - Rampa quintica de 3 s desde la pose inicial medida hasta el inicio de
+//      la trayectoria (continuidad de posicion, velocidad y aceleracion)
+//    - Retorno quintico al reposo en q_inicial al cumplirse t_run + pausa en
+//      reposo antes de soltar el torque: el robot queda en la pose de partida
+//      y el nodo se puede volver a ejecutar sobre el mismo Gazebo
+//    - Escritura de CSV:  gz_fl_data_<test_num>.csv (sin el retorno final)
 //    - Timer de control a 100 Hz
 //    - Parametros ROS:  test_num, t_run
 //
@@ -64,6 +69,11 @@ static constexpr int    NARM = 4;    // articulaciones controladas (joint1..join
 // (usa la velocidad DESEADA, senal sin ruido: eps pequeno es seguro)
 static constexpr double FRIC_EPS = 0.05;
 
+// Duraciones de la rampa inicial, del retorno final a q_inicial y de la pausa
+// en reposo antes de soltar el torque [s] (infraestructura)
+static constexpr double RAMP_TIME_S   = 3.0;
+static constexpr double RETURN_TIME_S = 3.0;
+static constexpr double HOLD_TIME_S   = 0.5;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  SECCION 1 — TRAYECTORIA DE REFERENCIA ARTICULAR
@@ -83,6 +93,10 @@ struct Reference {
 //    ref.q   << q1_des(t),   q2_des(t),   q3_des(t),   q4_des(t);
 //    ref.dq  << dq1_des(t),  dq2_des(t),  dq3_des(t),  dq4_des(t);
 //    ref.ddq << ddq1_des(t), ddq2_des(t), ddq3_des(t), ddq4_des(t);
+//
+//  Nota: esta funcion se usa para t >= RAMP_TIME_S. Para t < RAMP_TIME_S
+//        se aplica automaticamente la rampa quintica desde la pose inicial
+//        hasta desiredTrajectory(RAMP_TIME_S) (ver quinticTransition).
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -106,6 +120,54 @@ static Reference desiredTrajectory(double t)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ── Transiciones quinticas (INFRAESTRUCTURA — no es necesario modificar) ────
+// Polinomio quintico general: interpola (q,dq,ddq) desde el estado de borde
+// (q0,v0,a0) en t=0 hasta (qf,vf,af) en t=T.
+static Reference quinticBlend(
+  double t, double T,
+  const Eigen::Vector4d & q0, const Eigen::Vector4d & v0, const Eigen::Vector4d & a0,
+  const Eigen::Vector4d & qf, const Eigen::Vector4d & vf, const Eigen::Vector4d & af)
+{
+  if (T <= 0.0) {
+    Reference ref;
+    ref.q = qf; ref.dq = vf; ref.ddq = af;
+    return ref;
+  }
+
+  const double T2 = T*T, T3 = T2*T, T4 = T3*T, T5 = T4*T;
+  const Eigen::Vector4d c0 = q0;
+  const Eigen::Vector4d c1 = v0;
+  const Eigen::Vector4d c2 = 0.5 * a0;
+  const Eigen::Vector4d c3 = (20.0*(qf-q0) - (8.0*vf+12.0*v0)*T - (3.0*a0-af)*T2) / (2.0*T3);
+  const Eigen::Vector4d c4 = (30.0*(q0-qf) + (14.0*vf+16.0*v0)*T + (3.0*a0-2.0*af)*T2) / (2.0*T4);
+  const Eigen::Vector4d c5 = (12.0*(qf-q0) - (6.0*vf+6.0*v0)*T - (a0-af)*T2) / (2.0*T5);
+
+  const double t2 = t*t, t3 = t2*t, t4 = t3*t, t5 = t4*t;
+  Reference ref;
+  ref.q   = c0 + c1*t  + c2*t2  + c3*t3  + c4*t4  + c5*t5;
+  ref.dq  = c1 + 2.0*c2*t + 3.0*c3*t2 + 4.0*c4*t3 + 5.0*c5*t4;
+  ref.ddq = 2.0*c2 + 6.0*c3*t + 12.0*c4*t2 + 20.0*c5*t3;
+  return ref;
+}
+
+// Rampa inicial: parte en reposo en q0 y llega a la trayectoria en t = T, con
+// velocidad y aceleracion continuas en el empalme.
+static Reference quinticTransition(double t, double T, const Eigen::Vector4d & q0)
+{
+  const Reference target = desiredTrajectory(T);
+  return quinticBlend(t, T, q0, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero(),
+                      target.q, target.dq, target.ddq);
+}
+
+// Retorno final: parte del estado de la trayectoria al cumplirse t_run
+// (start = desiredTrajectory(t_run)) y llega en reposo a qf (q_inicial).
+static Reference quinticReturn(double t, double T, const Reference & start,
+                               const Eigen::Vector4d & qf)
+{
+  return quinticBlend(t, T, start.q, start.dq, start.ddq,
+                      qf, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero());
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  SECCION 2 — GANANCIAS DEL CONTROLADOR
@@ -240,7 +302,33 @@ private:
     Eigen::Vector4d q, dq;
     read_js(q, dq);
 
-    const Reference ref = desiredTrajectory(t_);
+    // Captura de la pose inicial (primer tick con /joint_states valido)
+    if (!q_initial_captured_) {
+      q_initial_ = q;
+      q_initial_captured_ = true;
+      RCLCPP_INFO(this->get_logger(), "q_inicial=[%.3f %.3f %.3f %.3f] rad",
+        q[0], q[1], q[2], q[3]);
+    }
+
+    // Referencia: rampa quintica inicial + trayectoria deseada + retorno
+    // quintico a q_inicial + pausa en reposo (infraestructura)
+    Reference ref;
+    if (t_ < RAMP_TIME_S) {
+      ref = quinticTransition(t_, RAMP_TIME_S, q_initial_);
+    } else if (t_run_ <= 0.0 || t_ < t_run_) {
+      ref = desiredTrajectory(t_);
+    } else if (t_ < t_run_ + RETURN_TIME_S) {
+      if (!return_logged_) {
+        RCLCPP_INFO(this->get_logger(),
+          "Iniciando retorno quintico a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
+        return_logged_ = true;
+      }
+      ref = quinticReturn(t_ - t_run_, RETURN_TIME_S, desiredTrajectory(t_run_), q_initial_);
+    } else {
+      ref.q = q_initial_;
+      ref.dq.setZero();
+      ref.ddq.setZero();
+    }
 
     // ── 2. Estado completo para Pinocchio (articulaciones de pinza = 0) ────
     Eigen::VectorXd q_pin  = Eigen::VectorXd::Zero(model_.nv);
@@ -305,8 +393,9 @@ private:
       t_, q[0], q[1], q[2], q[3],
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
-    // ── 6. CSV ────────────────────────────────────────────────────────────
-    if (csv_.is_open()) {
+    // ── 6. CSV (excluye el retorno final y la pausa en reposo) ────────────
+    const bool in_return_or_hold = (t_run_ > 0.0 && t_ >= t_run_);
+    if (csv_.is_open() && !in_return_or_hold) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
            << ',' << q[0]       << ',' << q[1]       << ',' << q[2]       << ',' << q[3]
@@ -319,10 +408,11 @@ private:
 
     t_ += 0.01;
 
-    // ── 7. Detener al cumplirse el tiempo de simulacion ───────────────────
-    if (t_run_ > 0.0 && t_ >= t_run_) {
+    // ── 7. Fin: tras el retorno y la pausa se suelta el torque (el robot ──
+    //       queda en la pose de partida, listo para otra ejecucion)
+    if (t_run_ > 0.0 && t_ >= t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
       RCLCPP_INFO(this->get_logger(),
-        "Simulacion completada (%.1f s). Deteniendo control.", t_run_);
+        "Retorno a q_inicial completado (t=%.1f s). Deteniendo control.", t_);
       std_msgs::msg::Float64MultiArray zero;
       zero.data.assign(NARM, 0.0);
       torque_pub_->publish(zero);
@@ -342,6 +432,10 @@ private:
 
   Eigen::Vector4d fric_damping_{Eigen::Vector4d::Zero()};
   Eigen::Vector4d fric_coulomb_{Eigen::Vector4d::Zero()};
+
+  Eigen::Vector4d q_initial_{Eigen::Vector4d::Zero()};
+  bool q_initial_captured_{false};
+  bool return_logged_{false};
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  joint_sub_;
