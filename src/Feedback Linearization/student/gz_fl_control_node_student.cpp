@@ -314,6 +314,10 @@ private:
         RCLCPP_INFO(this->get_logger(), "CSV cerrado: %s", csv_path_.c_str());
       }
       timer_->cancel();
+      // Fin de la ejecucion sin Ctrl+C: breve espera para que el torque cero
+      // llegue al controlador de Gazebo y luego se cierra el proceso
+      rclcpp::sleep_for(100ms);
+      rclcpp::shutdown();
     }
   }
 

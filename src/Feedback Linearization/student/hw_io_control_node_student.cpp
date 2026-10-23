@@ -344,12 +344,11 @@ private:
     //    nle4 (4×1)              — efectos no lineales      nle(q, dq)
     //    KP_Y, KD_Y              — ganancias (definidas en Seccion 2)
     //    gain_scale_             — factor de escala de ganancias
-    //    TAU_MAX                 — saturacion de torque
     //
     // ═══════════════════════════════════════════════════════════════════════
 
     // -- COMPLETAR --
-    
+
     // Aplicar escala de ganancia (gain_scale_)
     const Eigen::Vector4d kp_y = KP_Y * gain_scale_;
     const Eigen::Vector4d kd_y = KD_Y * std::sqrt(std::max(gain_scale_, 0.0));

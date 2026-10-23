@@ -13,8 +13,8 @@
 //    tau   = M(q) * qddot + b(q,dq)
 //
 //  Se debe completar las secciones marcadas con COMPLETAR:
-//    SECCION 1 — Ganancias y parametros del controlador
-//    SECCION 2 — Trayectoria de referencia cartesiana
+//    SECCION 1 — Trayectoria de referencia cartesiana
+//    SECCION 2 — Ganancias y parametros del controlador
 //    SECCION 3 — Ley de control
 //
 //  Infraestructura proporcionada (NO modificar):
@@ -380,6 +380,10 @@ private:
         RCLCPP_INFO(this->get_logger(), "CSV cerrado: %s", csv_path_.c_str());
       }
       timer_->cancel();
+      // Fin de la ejecucion sin Ctrl+C: breve espera para que el torque cero
+      // llegue al controlador de Gazebo y luego se cierra el proceso
+      rclcpp::sleep_for(100ms);
+      rclcpp::shutdown();
     }
   }
 
