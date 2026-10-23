@@ -137,18 +137,25 @@ def generate_launch_description():
     # spawners colgados. Si hay dos controller_manager activos, el spawner conecta
     # al viejo (estado inconsistente) y falla al configurar los controladores.
     # ros2 daemon stop/start limpia el cache de descubrimiento de nodos muertos.
+    #
+    # Los patrones de pkill -f van como "[g]z sim": el regex sigue encontrando
+    # "gz sim" en otros procesos, pero no en la linea de comando de este mismo
+    # bash -c (que contiene el texto "[g]z sim"). Sin el corchete, el primer
+    # pkill mataba a la propia limpieza y nunca se reiniciaba el daemon. El
+    # spawner se busca por su ruta: "spawner" a secas tambien coincide con
+    # demonios del escritorio (gvfsd-* --spawner).
     cleanup_gz = ExecuteProcess(
         cmd=[
             'bash', '-c',
-            'pkill -9 -f "gz sim"              2>/dev/null || true; '
-            'pkill -9 -f "ign gazebo"          2>/dev/null || true; '
-            'pkill -9 -f "gz-sim"              2>/dev/null || true; '
-            'pkill -9 gz                       2>/dev/null || true; '
-            'pkill -9 ign                      2>/dev/null || true; '
-            'pkill -9 ruby                     2>/dev/null || true; '
-            'pkill -9 -f robot_state_publisher 2>/dev/null || true; '
-            'pkill -9 -f parameter_bridge      2>/dev/null || true; '
-            'pkill -9 -f spawner               2>/dev/null || true; '
+            'pkill -9 -f "[g]z sim"                     2>/dev/null || true; '
+            'pkill -9 -f "[i]gn gazebo"                 2>/dev/null || true; '
+            'pkill -9 -f "[g]z-sim"                     2>/dev/null || true; '
+            'pkill -9 gz                                2>/dev/null || true; '
+            'pkill -9 ign                               2>/dev/null || true; '
+            'pkill -9 ruby                              2>/dev/null || true; '
+            'pkill -9 -f "[r]obot_state_publisher"      2>/dev/null || true; '
+            'pkill -9 -f "[p]arameter_bridge"           2>/dev/null || true; '
+            'pkill -9 -f "[c]ontroller_manager/spawner" 2>/dev/null || true; '
             'ros2 daemon stop 2>/dev/null; ros2 daemon start 2>/dev/null; '
             'sleep 2; '
             'echo "[cleanup] gz and ROS 2 zombie processes cleared"',
