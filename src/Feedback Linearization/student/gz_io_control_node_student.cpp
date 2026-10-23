@@ -30,9 +30,10 @@
 //    - Captura automatica de la pose inicial del robot
 //    - Suscriptor /joint_states  →  q, dq
 //    - Publicador /arm_effort_controller/commands  →  tau
-//    - Retorno suave (5to orden) a la pose inicial al cumplirse t_run + pausa
-//      en reposo antes de soltar el torque: el robot queda en la pose de
-//      partida y el nodo se puede volver a ejecutar sobre el mismo Gazebo
+//    - Retorno articular suave (5to orden, omx::JointReturn) a la pose inicial
+//      al cumplirse t_run + pausa en reposo antes de soltar el torque: el
+//      robot queda en la pose de partida y el nodo se puede volver a ejecutar
+//      sobre el mismo Gazebo
 //    - Escritura de CSV:  gz_io_data_<test_num>.csv (sin el retorno final)
 //    - Timer de control a 200 Hz (igual que los nodos hw_)
 //    - Parametros ROS:  test_num, t_run
@@ -57,6 +58,7 @@
 
 #include <Eigen/Dense>   // Core + descomposiciones (antes llegaban via Pinocchio)
 #include <Eigen/LU>
+#include "omx/joint_return.hpp"
 #include "omx/robot_model.hpp"
 #include "omx/ros_utils.hpp"
 #include "omx/trajectory.hpp"
@@ -270,6 +272,7 @@ private:
 
     if (!y0_initialized_) {
       y0_ = y;
+      ret_.setHome(q);   // pose articular a la que vuelve el retorno final
       y0_initialized_ = true;
       RCLCPP_INFO(this->get_logger(),
         "Pose inicial capturada: x=%.3f  y=%.3f  z=%.3f  phi=%.3f rad",
@@ -279,22 +282,27 @@ private:
     // ── 6. Referencia segun fase ──────────────────────────────────────────
     // [0, T_TRANS)                  : transicion suave desde la pose inicial hasta Y_START
     // [T_TRANS, t_run)              : trayectoria definida en circularTrajectory()
-    // [t_run, t_run+RETURN_TIME_S)  : retorno suave a la pose inicial y0
-    // [t_run+RETURN_TIME_S, ...)    : pausa en reposo en y0 (luego torque cero)
+    // [t_run, t_run+RETURN_TIME_S)  : retorno articular suave a la pose inicial
+    // [t_run+RETURN_TIME_S, ...)    : pausa en reposo en la pose inicial (luego torque cero)
+    // En el retorno y la pausa la referencia es articular (ref_q); ref.y guarda
+    // su pose cartesiana (FK) para que la Seccion 3 reciba una referencia valida
+    // (su par se descarta en el retorno).
+    const bool returning = (t_run_ > 0.0 && t_ >= t_run_);
     CartRef ref;
+    omx::Reference ref_q{q, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero()};
     if (t_ < T_TRANS) {
       ref = omx::quinticTransition(t_, T_TRANS, y0_, CartRef{Y_START, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero()});
-    } else if (t_run_ <= 0.0 || t_ < t_run_) {
+    } else if (!returning) {
       ref = circularTrajectory(t_ - T_TRANS);
-    } else if (t_ < t_run_ + RETURN_TIME_S) {
-      if (!return_logged_) {
-        RCLCPP_INFO(this->get_logger(),
-          "Iniciando retorno cartesiano a y_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
-        return_logged_ = true;
-      }
-      ref = omx::quinticReturn(t_ - t_run_, RETURN_TIME_S, circularTrajectory(t_run_ - T_TRANS), y0_);
     } else {
-      ref.y = y0_;
+      if (!ret_.started()) {
+        ret_.start(q, dq);
+        RCLCPP_INFO(this->get_logger(),
+          "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
+      }
+      ref_q = ret_.reference(t_ - t_run_);
+      const Eigen::Vector3d p_ref = model_.eePosition(ref_q.q);
+      ref.y << p_ref[0], p_ref[1], p_ref[2], ref_q.q[1] + ref_q.q[2] + ref_q.q[3];
       ref.ydot.setZero();
       ref.yddot.setZero();
     }
@@ -321,16 +329,25 @@ private:
 
     // ══════════════════════════════════════════════════════════════════════
 
+    // ── Retorno final a la pose inicial (infraestructura, NO modificar) ────
+    //  Desde t_run el par lo da el retorno articular (omx::JointReturn); el
+    //  par de la ley de control de la Seccion 3 se descarta.
+    if (returning) {
+      tau_sat = ret_.torque(model_, q, dq, ref_q);
+    }
+
     // ── Feedforward de friccion del URDF (infraestructura, NO modificar) ───
     //  Gazebo simula la friccion articular del URDF, pero Pinocchio no la
     //  incluye en M/nle: se compensa aqui, fuera de la ley de control.
     //  Viscosa con la velocidad medida; Coulomb con la velocidad articular
-    //  DESEADA dq_des = J4⁺·ydot_des (senal sin ruido). Tras sumarla se
-    //  re-satura a TAU_MAX.
+    //  DESEADA dq_des = J4⁺·ydot_des (senal sin ruido; en el retorno, la de la
+    //  referencia articular). Tras sumarla se re-satura a TAU_MAX.
     {
       const Eigen::Matrix4d A_fric =
         J4 * J4.transpose() + LAMBDA * LAMBDA * Eigen::Matrix4d::Identity();
-      const Eigen::Vector4d dq_des = J4.transpose() * A_fric.ldlt().solve(ref.ydot);
+      const Eigen::Vector4d dq_des = returning
+        ? ref_q.dq
+        : Eigen::Vector4d(J4.transpose() * A_fric.ldlt().solve(ref.ydot));
       for (int i = 0; i < NARM; ++i) {
         tau_sat[i] += fric_damping_[i] * dq[i]
                     + fric_coulomb_[i] * std::tanh(dq_des[i] / FRIC_EPS);
@@ -371,7 +388,7 @@ private:
     //       queda en la pose de partida, listo para otra ejecucion)
     if (t_run_ > 0.0 && t_ >= t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
       RCLCPP_INFO(this->get_logger(),
-        "Retorno a y_inicial completado (t=%.1f s). Deteniendo control.", t_);
+        "Retorno a q_inicial completado (t=%.1f s). Deteniendo control.", t_);
       std_msgs::msg::Float64MultiArray zero;
       zero.data.assign(NARM, 0.0);
       torque_pub_->publish(zero);
@@ -398,7 +415,7 @@ private:
 
   Eigen::Vector4d y0_;           // pose cartesiana inicial capturada
   bool            y0_initialized_;
-  bool            return_logged_{false};
+  omx::JointReturn ret_{omx::JointReturn::forSimulation(RETURN_TIME_S)};   // retorno articular final a la pose inicial
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
   omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)

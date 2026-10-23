@@ -148,7 +148,7 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //  mili-torques: las ganancias de sim dejan la muneca pegada). Dentro de la
 //  capa el SMC equivale a un PD con:
 //    kp_eq = Lambda*(K_V + K_S/phi)   kd_eq = Lambda + K_V + K_S/phi
-//  Apuntar a la rigidez validada por FL: kp_eq ~ [400, 400, 600, 3000].
+//  Apuntar a kp_eq del orden de cientos en J1–J3 y de miles en J4.
 //
 //  Rangos recomendados (con phi = 0.3):
 //    LAMBDA_Q : 15 – 45   [1/s]

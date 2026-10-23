@@ -159,9 +159,8 @@ public:
     this->declare_parameter<int>        ("log_id",     30);
     this->declare_parameter<double>     ("t_run",      40.0);
     this->declare_parameter<double>     ("gain_scale", 1.0);
-    // Rigidez/amortiguamiento ≈ M_ii(q)·kp y M_ii(q)·kd del FL (kp=[400 400 600
-    // 3000], kd=[28 28 34 77]) con la inercia media del URDF sobre act1:
-    // misma banda (ωn ≈ 20–50 rad/s) y ζ ≈ 0.5–1.0 en todo el recorrido.
+    // Con la inercia media del URDF sobre act1: ωn ≈ 20–50 rad/s y
+    // ζ ≈ 0.5–1.0 en todo el recorrido.
     this->declare_parameter<dvec>("kp", dvec{2.5,  5.0,  5.0,  3.0 });
     this->declare_parameter<dvec>("kd", dvec{0.17, 0.33, 0.28, 0.08});
     this->declare_parameter<double>("ab_alpha", 0.2);

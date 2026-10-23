@@ -29,8 +29,8 @@
  *     articular DESEADA qdot_des = J4+ * ydot_des 
  *   - Saturacion defensiva del torque a +/-tau_max antes de enviar corriente
  *   - Guardas de altura minima Z_MIN_FLOOR (referencia y efector medido)
- *   - Retorno cartesiano al reposo en y_inicial al completar t_run + pausa en
- *     reposo antes de cortar corriente
+ *   - Retorno articular al reposo en la pose inicial (omx::JointReturn) al
+ *     completar t_run + pausa en reposo antes de cortar corriente
  *   - Verificacion de limites articulares y de corriente medida (parada de emergencia)
  *   - Deteccion de overruns del lazo de control
  *   - Publicador /hw/joint_states y escritura de CSV (el retorno final y la
@@ -75,6 +75,7 @@
 #include <Eigen/LU>
 
 #include "omx/dynamixel_arm.hpp"
+#include "omx/joint_return.hpp"
 #include "omx/motor_model.hpp"
 #include "omx/robot_model.hpp"
 #include "omx/ros_utils.hpp"
@@ -124,7 +125,7 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 static constexpr double T_TRANS       = 3.0;   // duracion de la transicion inicial [s]
-static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno cartesiano a y_inicial
+static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno articular a la pose inicial
 static constexpr double HOLD_TIME_S   = 0.5;   // pausa en reposo antes de cortar corriente
 
 // Punto de inicio de la trayectoria cartesiana [x, y, z, phi] en t=0
@@ -394,7 +395,7 @@ private:
 
     const double t_shutdown = t_run_ + RETURN_TIME_S + HOLD_TIME_S;
     if (t_run_ > 0.0 && t >= t_shutdown) {
-      RCLCPP_INFO(get_logger(), "Retorno a y_inicial completado. Deteniendo (t=%.1f s).", t);
+      RCLCPP_INFO(get_logger(), "Retorno a q_inicial completado. Deteniendo (t=%.1f s).", t);
       timer_->cancel();
       arm_.close();
       if (csv_.is_open()) { csv_.flush(); csv_.close(); }
@@ -431,6 +432,7 @@ private:
       const Eigen::Vector3d p0 = model_.eePosition(q);
       const double phi0        = q[1] + q[2] + q[3];
       y0_ = Eigen::Vector4d{p0[0], p0[1], p0[2], phi0};
+      ret_.setHome(q);   // pose articular a la que vuelve el retorno final
       y0_initialized_ = true;
       RCLCPP_INFO(get_logger(),
         "y_inicial=[%.3f %.3f %.3f %.3f]  Y_START=[%.3f %.3f %.3f %.3f]",
@@ -447,23 +449,28 @@ private:
       }
     }
 
-    // 5. Referencia cartesiana segun fase (transicion inicial + trayectoria + retorno final)
+    // 5. Referencia segun fase (transicion inicial + trayectoria cartesianas,
+    //    retorno final articular). En el retorno y la pausa ref.y guarda la pose
+    //    cartesiana (FK) de la referencia articular ref_q, para la guarda de
+    //    altura y el log.
+    const bool returning = (t_run_ > 0.0 && t >= t_run_);
     CartRef ref;
+    omx::Reference ref_q{q, Vec4::Zero(), Vec4::Zero()};
     if (t < T_TRANS) {
       ref = omx::quinticTransition(t, T_TRANS, y0_, CartRef{Y_START, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero()});
-    } else if (t_run_ <= 0.0 || t < t_run_) {
+    } else if (!returning) {
       ref = cartesianTrajectory(t - T_TRANS);
-    } else if (t < t_run_ + RETURN_TIME_S) {
-      if (!return_logged_) {
-        RCLCPP_INFO(get_logger(), "Iniciando retorno cartesiano a y_inicial (t=%.1fs, dur=%.1fs)",
-          t, RETURN_TIME_S);
-        return_logged_ = true;
-      }
-      // Retorno quintico desde el estado de la trayectoria en t_run (posicion,
-      // velocidad y aceleracion continuas, como FL y SMC) hasta y0 en reposo
-      ref = omx::quinticReturn(t - t_run_, RETURN_TIME_S, cartesianTrajectory(t_run_ - T_TRANS), y0_);
     } else {
-      ref.y = y0_;
+      // Retorno articular: quintica desde el estado medido en t_run hasta
+      // q_inicial en reposo, y luego pausa en reposo en q_inicial
+      if (!ret_.started()) {
+        ret_.start(q, dq_hat_);
+        RCLCPP_INFO(get_logger(), "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)",
+          t, RETURN_TIME_S);
+      }
+      ref_q = ret_.reference(t - t_run_);
+      const Eigen::Vector3d p_ref = model_.eePosition(ref_q.q);
+      ref.y << p_ref[0], p_ref[1], p_ref[2], ref_q.q[1] + ref_q.q[2] + ref_q.q[3];
       ref.ydot.setZero();
       ref.yddot.setZero();
     }
@@ -493,9 +500,12 @@ private:
     }
 
     // 7. Conversion torque -> corriente (saturacion defensiva a +/-tau_max;
-    //    Fc con la velocidad articular deseada)
-    const Vec4 tau = ctrl.tau.cwiseMin(hw_.limits.tau_max).cwiseMax(-hw_.limits.tau_max);
-    const auto cur_cmd = omx::torqueToCurrent(hw_, tau, dq_hat_, ctrl.dq_des);
+    //    Fc con la velocidad articular deseada). En el retorno final el par lo
+    //    da el retorno articular a la pose inicial; el de la Seccion 3 se descarta.
+    const Vec4 tau_ctrl = returning ? ret_.torque(model_, q, dq_hat_, ref_q) : ctrl.tau;
+    const Vec4 dq_des   = returning ? ref_q.dq : ctrl.dq_des;
+    const Vec4 tau = tau_ctrl.cwiseMin(hw_.limits.tau_max).cwiseMax(-hw_.limits.tau_max);
+    const auto cur_cmd = omx::torqueToCurrent(hw_, tau, dq_hat_, dq_des);
 
     // 8. Escribir corriente
     if (!arm_.writeCurrents(cur_cmd)) {
@@ -528,7 +538,7 @@ private:
       js_pub_->publish(js);
     }
 
-    // 11. CSV (excluye el retorno final a y_inicial y la pausa en reposo,
+    // 11. CSV (excluye el retorno final a q_inicial y la pausa en reposo,
     //     asi el CSV solo cubre transicion inicial + trayectoria periodica)
     const bool in_return_or_hold = (t_run_ > 0.0 && t >= t_run_);
     if (csv_.is_open() && !in_return_or_hold) {
@@ -599,8 +609,8 @@ private:
   omx::DynamixelArm arm_{this->get_logger()};
 
   bool y0_initialized_;
-  bool return_logged_{false};
   Eigen::Vector4d y0_;
+  omx::JointReturn ret_{omx::JointReturn::forHardware(RETURN_TIME_S)};   // retorno articular final a la pose inicial
 
   std::chrono::high_resolution_clock::time_point start_time_;
   int log_cnt_{0};

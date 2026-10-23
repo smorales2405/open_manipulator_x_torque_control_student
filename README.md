@@ -226,6 +226,7 @@ open_manipulator_x_torque_control/
 │   ├── robot_model.hpp           # Pinocchio wrapper: M(q), n(q,dq), g(q), RNEA, EE kinematics, Slotine-Li
 │   ├── dynamixel_io.hpp          # Control table, units, calibration, block state read
 │   ├── dynamixel_arm.hpp         # Port/servo setup, read state, write currents, safe shutdown
+│   ├── joint_return.hpp          # Joint-space final return (PD + gravity compensation) for the IO nodes
 │   ├── motor_model.hpp           # Motor model, HW limits and torque→current conversion (motor YAML)
 │   ├── trajectory.hpp            # Quintic transition/return/blend/profile (joint and Cartesian)
 │   ├── ros_utils.hpp             # Motor-YAML node options, CSV logging, /joint_states listener
