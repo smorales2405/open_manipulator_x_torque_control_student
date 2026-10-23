@@ -34,7 +34,7 @@
 //      en reposo antes de soltar el torque: el robot queda en la pose de
 //      partida y el nodo se puede volver a ejecutar sobre el mismo Gazebo
 //    - Escritura de CSV:  gz_io_data_<test_num>.csv (sin el retorno final)
-//    - Timer de control a 100 Hz
+//    - Timer de control a 200 Hz (igual que los nodos hw_)
 //    - Parametros ROS:  test_num, t_run
 //
 //  Ejemplo de ejecucion (con la simulacion Gazebo ya lanzada):
@@ -204,7 +204,8 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    timer_ = this->create_wall_timer(10ms, [this]() { tick(); });
+    // Lazo de control a 200 Hz (dt = 5 ms), igual que el nodo hw
+    timer_ = this->create_wall_timer(5ms, [this]() { tick(); });
   }
 
   ~IOControlNode()
@@ -232,7 +233,7 @@ private:
       this->get_logger());
   }
 
-  // ── Tick de control a 100 Hz ──────────────────────────────────────────────
+  // ── Tick de control a 200 Hz ──────────────────────────────────────────────
   void tick()
   {
     if (!js_.ready()) { return; }
@@ -376,7 +377,7 @@ private:
            << '\n';
     }
 
-    t_ += 0.01;
+    t_ += 0.005;   // Ts del lazo de 200 Hz
 
     // ── 9. Fin: tras el retorno y la pausa se suelta el torque (el robot ──
     //       queda en la pose de partida, listo para otra ejecucion)

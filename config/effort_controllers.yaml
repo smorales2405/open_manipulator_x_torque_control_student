@@ -4,7 +4,11 @@
 controller_manager:
   ros__parameters:
     use_sim_time: true
-    update_rate: 100
+    # 200 Hz: igual que el lazo de los nodos hw_ y de los gz_ de FL/SMC (timer de
+    # 5 ms). Con 100 Hz, /joint_states y el torque aplicado iban a la mitad de
+    # la tasa del nodo. Los nodos a 100 Hz siguen funcionando (su ultimo
+    # comando se mantiene durante dos ciclos).
+    update_rate: 200
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster

@@ -14,23 +14,23 @@
 //  Infraestructura proporcionada (NO modificar):
 //    - Carga del modelo Pinocchio / URDF
 //    - Calculo de M(q) y NLE(q,dq) mediante Pinocchio
-//    - Feedforward de la friccion del URDF (siempre activo, tras la ley de
-//      control): Pinocchio NO incluye <dynamics damping/friction> en M/NLE,
+//    - Feedforward de la friccion del URDF 
+//      Pinocchio NO incluye <dynamics damping/friction> en M/NLE,
 //      pero Gazebo SI simula esa friccion; se compensa como infraestructura
 //    - Suscriptor /joint_states  →  q, dq
 //    - Publicador /arm_effort_controller/commands  →  tau
 //    - Rampa quintica de 3 s desde la pose inicial medida hasta el inicio de
-//      la trayectoria (continuidad de posicion, velocidad y aceleracion)
+//      la trayectoria 
 //    - Retorno quintico al reposo en q_inicial al cumplirse t_run + pausa en
 //      reposo antes de soltar el torque: el robot queda en la pose de partida
 //      y el nodo se puede volver a ejecutar sobre el mismo Gazebo
 //    - Escritura de CSV:  gz_fl_data_<test_num>.csv (sin el retorno final)
-//    - Timer de control a 100 Hz
+//    - Timer de control a 200 Hz (igual que los nodos hw_)
 //    - Parametros ROS:  test_num, t_run
 //
 //  Ejemplo de ejecucion (con la simulacion Gazebo ya lanzada):
 //    ros2 launch open_manipulator_x_torque_control torque_sim.launch.py
-//    ros2 run open_manipulator_x_torque_control gz_fl_control_node_student --ros-args -p test_num:=1 -p t_run:=15.0
+//    ros2 run open_manipulator_x_torque_control gz_fl_control_node_student --ros-args -p test_num:=1 -p t_run:=20.0
 // ============================================================================
 
 #include <chrono>
@@ -84,14 +84,10 @@ using omx::Reference;   // {q, dq, ddq}
 //  Parametro de entrada:
 //    t  — tiempo actual de simulacion [s]
 //
-//  Salida esperada (llenar ref.q, ref.dq, ref.ddq):
+//  Salida esperada:
 //    ref.q   << q1_des(t),   q2_des(t),   q3_des(t),   q4_des(t);
 //    ref.dq  << dq1_des(t),  dq2_des(t),  dq3_des(t),  dq4_des(t);
 //    ref.ddq << ddq1_des(t), ddq2_des(t), ddq3_des(t), ddq4_des(t);
-//
-//  Nota: esta funcion se usa para t >= RAMP_TIME_S. Para t < RAMP_TIME_S
-//        se aplica automaticamente la rampa quintica desde la pose inicial
-//        hasta desiredTrajectory(RAMP_TIME_S) (ver quinticTransition).
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -100,7 +96,7 @@ static Reference desiredTrajectory(double t)
   Reference ref;
 
   // -------------------------------------------------------------------
-  // COMPLETAR: implementar aqui
+  // COMPLETAR
   // -------------------------------------------------------------------
 
   (void)t;
@@ -180,7 +176,8 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    timer_ = this->create_wall_timer(10ms, [this]() { tick(); });
+    // Lazo de control a 200 Hz (dt = 5 ms), igual que el nodo hw
+    timer_ = this->create_wall_timer(5ms, [this]() { tick(); });
   }
 
   ~FLControlNode()
@@ -207,7 +204,7 @@ private:
       this->get_logger());
   }
 
-  // ── Tick de control a 100 Hz ──────────────────────────────────────────────
+  // ── Tick de control a 200 Hz ──────────────────────────────────────────────
   void tick()
   {
     if (!js_.ready()) { return; }
@@ -261,16 +258,10 @@ private:
     //    KP, KD                   — ganancias (definidas en Seccion 1)
     //    TAU_MAX                  — saturacion de torque
     //
-    //  Ley de control Feedback Linearization:
-    //    e       = ref.q - q
-    //    de      = ref.dq - dq
-    //    v       = ref.ddq + Kp*e + Kd*de
-    //    tau     = M(q) * v + b(q,dq)
-    //    tau_sat = clamp(tau, -TAU_MAX, TAU_MAX)
     // ══════════════════════════════════════════════════════════════════════
 
     (void)M; (void)nle;   // suprimir warnings mientras la seccion esta incompleta
-    Eigen::Vector4d tau_sat = Eigen::Vector4d::Zero();   // <-- reemplazar con implementacion
+    Eigen::Vector4d tau_sat = Eigen::Vector4d::Zero();   // <-- reemplazar 
 
     // ══════════════════════════════════════════════════════════════════════
 
@@ -308,7 +299,7 @@ private:
            << '\n';
     }
 
-    t_ += 0.01;
+    t_ += 0.005;   // Ts del lazo de 200 Hz
 
     // ── 6. Fin: tras el retorno y la pausa se suelta el torque (el robot ──
     //       queda en la pose de partida, listo para otra ejecucion)
