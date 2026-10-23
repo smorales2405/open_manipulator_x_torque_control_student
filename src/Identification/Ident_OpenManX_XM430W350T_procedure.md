@@ -272,8 +272,10 @@ Al terminar tendrá 4 fragmentos `data/identification/friction_J<j>_log<id>.yaml
 ## 4. Paso 2 — α e I_offset: ensayo del lazo de corriente
 
 El nodo `hw_alpha_ident_node` mueve el robot por la trayectoria articular
-**act1** (la del laboratorio de FL: senos de 1 rad/s en J1–J3, J4 fijo en π/4;
-probada en el robot real dentro de límites) con un **PD articular +
+**act1** del laboratorio de FL (senos de 1 rad/s en J1–J3, probada en el robot
+real dentro de límites) con **J4 oscilando ±0.25 rad alrededor de π/4**, en
+fase con J1–J3 (en act1 J4 queda fijo y su k no es identificable; en fase, la
+pinza queda más lejos del robot que con J4 fijo), con un **PD articular +
 compensación de gravedad** del URDF, en modo corriente y con la **conversión
 nominal fija en el código** (α = 208.5 ticks/N·m, sin fricción ni offset). Del
 YAML de motor solo lee el bloque de hardware (ceros, signos, límites). Por eso:
@@ -323,10 +325,16 @@ Por joint ajusta `I_meas = k·I_cmd + b` y entrega `α = 208.5/k` e
 
 - alinea una muestra (los nodos leen el estado antes de escribir la corriente
   del ciclo) y filtra ambas señales con un pasa-bajos de fase cero de 2 Hz;
-- los joints con corriente comandada bien excitada (std ≥ 15 ticks,
-  corr ≥ 0.95; con act1, J2 por gravedad y J3 por fricción) usan su propio k.
-  J1 (sin gravedad) y J4 (fijo) usan el k compartido (mismo motor y firmware)
-  con su propio b;
+- un joint usa su propio k si su corriente comandada está bien excitada
+  (std ≥ 6 ticks), corr ≥ 0.95 y el **sesgo por cruce por cero** (columna
+  `sesgo0%`) es ≤ 2 %. El lazo entrega ~0.4 ticks menos de lo pedido, con el
+  signo de la corriente (0.1–0.45 ticks en 23 logs reales): en un joint con
+  corriente chica que cambia de signo a menudo, ese desfase baja la pendiente.
+  Es el caso de J1 (sin gravedad, solo ±10 ticks de fricción): su k propio sale
+  0.92–0.97 aunque el lazo esté bien. Con este ensayo J2 (gravedad), J3
+  (fricción) y J4 (fricción y gravedad del efector) usan su propio k; J1 usa
+  el k compartido (media de los excitados, mismo motor y firmware) con su
+  propio b;
 - descarta las muestras con corriente saturada.
 
 | Veredicto | Condición (joints excitados) | Acción |
@@ -336,8 +344,9 @@ Por joint ajusta `I_meas = k·I_cmd + b` y entrega `α = 208.5/k` e
 | **RE-EJECUTAR** (exit 2) | \|k−1\| > 10 %, sin excitación o log corto | el lazo no sigue la corriente pedida: revisar 12 V bajo carga, `current_limit_register`, modo de operación; repetir |
 
 Resultado de referencia: en 11 logs reales del lazo FL (jul–oct 2026, con
-distintos modelos en el YAML) dio k = 0.994–1.003, es decir α = 208.0–209.9
-ticks/N·m, |I_offset| < 1 tick y R² ≥ 0.99. Se genera el fragmento
+distintos modelos en el YAML) dio k = 0.994–1.003 en J2/J3, es decir
+α = 208.0–209.9 ticks/N·m, |I_offset| < 1 tick y R² ≥ 0.99. En los logs de
+act2 (J4 se mueve) J4 dio k = 0.98–1.00. Se genera el fragmento
 `data/identification/alpha_fit_log30.yaml`.
 
 > Un log del nodo FL (`data/lab4/real/act1/hw_fl_data_<ID>.csv`) también

@@ -3,8 +3,9 @@ alpha_ident.launch.py
 Lanza hw_alpha_ident_node: ensayo del Paso 2 de la identificación (alpha e
 I_offset; analizar con src/Identification/identify_alpha.py).
 
-El robot sigue la trayectoria articular act1 con un PD + compensación de
-gravedad en modo corriente, con la conversión NOMINAL fija en el código
+El robot sigue la trayectoria articular act1 (con J4 oscilando ±0.25 rad
+alrededor de π/4) con un PD + compensación de gravedad en modo corriente, con
+la conversión NOMINAL fija en el código
 (alpha = 208.5 ticks/N·m, sin fricción ni offset): no hay que editar
 config/motorXM430W350T_params.yaml (del YAML solo se lee el bloque de
 hardware) y no se necesita el nodo de Feedback Linearization.

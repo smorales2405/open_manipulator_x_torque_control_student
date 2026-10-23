@@ -41,10 +41,19 @@ Detalles del ajuste:
       señales: el lazo se evalúa en la banda en que operan los controladores;
       la cuantización y el stick-slip de alta frecuencia no sesgan k.
     · Se descartan las muestras con corriente comandada saturada (±0.25 s).
-    · Joints con I_cmd bien excitada (std ≥ 15 ticks y corr ≥ 0.95; con act1,
-      J2 por gravedad y J3 por fricción) → k propio. Joints débiles (J1 sin
-      gravedad, J4 casi fijo) → k compartido = media de los excitados (mismo
-      motor y firmware), b propio.
+    · k propio solo si el joint cumple las tres condiciones:
+        - I_cmd excitada: std ≥ 6 ticks;
+        - corr(I_cmd, I_meas) ≥ 0.95;
+        - sesgo por cruce por cero ≤ 2 %. El lazo entrega ~0.4 ticks MENOS de
+          lo pedido, con el signo de la corriente (medido en 23 logs reales:
+          0.1–0.45 ticks). Si la corriente es chica y cambia de signo a menudo,
+          ese desfase baja la pendiente: J1, sin gravedad y con ±10 ticks de
+          fricción, da k ≈ 0.92–0.97 aunque su lazo esté bien. El sesgo se
+          estima como 0.4·cov(I_cmd, sgn I_cmd)/var(I_cmd); si la corriente no
+          cambia de signo es ~0 (el desfase queda en b).
+      Con alpha_ident.launch.py: J2 (gravedad), J3 (fricción) y J4 (fricción y
+      gravedad del efector, oscila ±0.25 rad) → k propio; J1 → k compartido =
+      media de los excitados (mismo motor y firmware), b propio.
 
 Veredicto (sobre los joints excitados):
     |k−1| ≤ 3 %  → OK
@@ -97,8 +106,10 @@ KT_DATASHEET   = 1.7826           # [N·m/A] 4.1 N·m / 2.3 A (stall, 12 V)
 ALPHA_NOM      = 1.0 / (KT_DATASHEET * CURRENT_UNIT_A)   # ≈ 208.5 ticks/N·m
 
 # Identificabilidad del lazo por joint (sobre las señales filtradas)
-CMD_STD_MIN = 15.0                # [ticks] excitación mínima de I_cmd
+CMD_STD_MIN = 6.0                 # [ticks] excitación mínima de I_cmd
 CORR_MIN    = 0.95                # corr(I_cmd, I_meas) mínima
+SIGN_OFFSET = 0.4                 # [ticks] desfase del lazo con el signo de I (típico)
+ZC_BIAS_MAX = 0.02                # sesgo de k por cruce por cero máximo
 
 # Veredicto
 K_OK      = 0.03                  # |k−1| ≤ 3 %  → OK
@@ -228,17 +239,20 @@ y_f = filtfilt(b_lp, a_lp, y_raw, axis=0)
 # ════════════════════════════════════════════════════════════════════════════
 
 k_own = np.full(NJ, np.nan); b_own = np.full(NJ, np.nan)
-cmd_std = np.zeros(NJ); corr = np.zeros(NJ)
+cmd_std = np.zeros(NJ); corr = np.zeros(NJ); zc_bias = np.zeros(NJ)
 for i in range(NJ):
     m = mask_j[i]
     xi, yi = x_f[m, i], y_f[m, i]
     cmd_std[i] = float(np.std(xi))
     if cmd_std[i] > 1e-6 and np.std(yi) > 1e-6:
         corr[i] = float(np.corrcoef(xi, yi)[0, 1])
+        # Pendiente que perdería k por un desfase de SIGN_OFFSET·sgn(I_cmd)
+        zc_bias[i] = SIGN_OFFSET * float(np.cov(xi, np.sign(xi))[0, 1]) / cmd_std[i] ** 2
         A = np.column_stack([xi, np.ones(xi.size)])
         (k_own[i], b_own[i]), *_ = np.linalg.lstsq(A, yi, rcond=None)
 
-strong = [i for i in range(NJ) if cmd_std[i] >= CMD_STD_MIN and corr[i] >= CORR_MIN]
+strong = [i for i in range(NJ) if cmd_std[i] >= CMD_STD_MIN and corr[i] >= CORR_MIN
+          and zc_bias[i] <= ZC_BIAS_MAX]
 weak   = [i for i in range(NJ) if i not in strong]
 
 k = np.full(NJ, np.nan); b = np.zeros(NJ)
@@ -271,25 +285,31 @@ for i in range(NJ):
 #  Reporte
 # ════════════════════════════════════════════════════════════════════════════
 
-print("\n" + "=" * 92)
+print("\n" + "=" * 104)
 print(f" alpha / I_offset — lazo de corriente I_meas = k·I_cmd + b   [{os.path.basename(csv_in)}]")
-print("=" * 92)
+print("=" * 104)
 print(f"{'Joint':>6} {'k':>8} {'b':>7} {'alpha':>9} {'I_offset':>9} {'R²':>7} "
-      f"{'std(Icmd)':>10} {'corr':>6} {'sat%':>5}  fuente")
-print("-" * 92)
+      f"{'std(Icmd)':>10} {'corr':>6} {'sesgo0%':>8} {'sat%':>5}  fuente")
+print("-" * 104)
 for i in range(NJ):
     if not has_cmd[i]:
         fuente = "sin corriente comandada"
     elif i in strong:
         fuente = "k propio"
     else:
-        own = f" (propio {k_own[i]:.3f}, poco excitado)" if np.isfinite(k_own[i]) else ""
+        why = []
+        if cmd_std[i] < CMD_STD_MIN:  why.append("poco excitado")
+        if corr[i] < CORR_MIN:        why.append("corr baja")
+        if zc_bias[i] > ZC_BIAS_MAX:  why.append("cruza cero")
+        own = f" (propio {k_own[i]:.3f}, {', '.join(why)})" if np.isfinite(k_own[i]) else ""
         fuente = "k compartido" + own
     print(f"J{i+1:>5} {k[i]:8.4f} {b[i]:7.2f} {alpha[i]:9.2f} {I_off[i]:9.2f} {R2[i]:7.4f} "
-          f"{cmd_std[i]:10.1f} {corr[i]:6.3f} {100*sat_frac[i]:5.1f}  {fuente}")
-print("-" * 92)
+          f"{cmd_std[i]:10.1f} {corr[i]:6.3f} {100*zc_bias[i]:8.1f} {100*sat_frac[i]:5.1f}  {fuente}")
+print("-" * 104)
 print(f"  alpha = ALPHA_NOM/k con ALPHA_NOM = {ALPHA_NOM:.2f} ticks/N·m "
       f"(kt datasheet {KT_DATASHEET:.4f} N·m/A); I_offset = −b/k")
+print(f"  k propio si std(Icmd) ≥ {CMD_STD_MIN:.0f} ticks, corr ≥ {CORR_MIN} y sesgo0 "
+      f"≤ {100*ZC_BIAS_MAX:.0f} % (sesgo de k por cruce por cero)")
 print(f"  k compartido (joints débiles) = {k_shared:.4f}.  Unidades: b, I_offset [ticks]")
 
 # ── Veredicto ────────────────────────────────────────────────────────────────
@@ -297,8 +317,8 @@ fails, warns = [], []
 
 if not strong:
     fails.append(
-        f"Ningún joint con corriente comandada bien excitada (std ≥ {CMD_STD_MIN:.0f} ticks y\n"
-        f"   corr ≥ {CORR_MIN}).\n"
+        f"Ningún joint con corriente comandada bien excitada (std ≥ {CMD_STD_MIN:.0f} ticks,\n"
+        f"   corr ≥ {CORR_MIN} y sesgo0 ≤ {100*ZC_BIAS_MAX:.0f} %).\n"
         "   → Acción: verifique que el robot realmente se movió (¿parada de emergencia?)\n"
         "     y repita con alpha_ident.launch.py y t_run ≥ 30 s.")
 else:
@@ -330,14 +350,14 @@ for i in range(NJ):
         warns.append(f"J{i+1}: {100*sat_frac[i]:.1f}% de muestras con corriente saturada "
                      "(descartadas).\n   → Si supera ~10 %, repita con gain_scale:=0.7.")
 
-print("\n" + "=" * 92)
+print("\n" + "=" * 104)
 if fails:
     print(" VEREDICTO: RE-EJECUTAR — los datos NO sirven para identificar alpha")
     for f_ in fails:
         print(" ✗ " + f_)
     for w in warns:
         print(" ! " + w)
-    print("=" * 92)
+    print("=" * 104)
     sys.exit(2)
 elif warns:
     print(" VEREDICTO: REVISAR — alpha utilizable, pero con observaciones")
@@ -347,7 +367,7 @@ else:
     print(" VEREDICTO: OK — el lazo de corriente sigue lo comandado; alpha e I_offset listos")
 print("   Siguiente paso: python3 src/Identification/assemble_motor_params.py "
       "--alpha-log <este log> --friction-logs <J1> <J2> <J3> <J4>")
-print("=" * 92)
+print("=" * 104)
 
 # ════════════════════════════════════════════════════════════════════════════
 #  Salidas: fragmento YAML + CSV de ajuste
@@ -374,6 +394,8 @@ with open(yaml_out, "w") as f:
     f.write(f"alpha_nominal:    {ALPHA_NOM:.4f}\n")
     f.write(f"kt_datasheet:     {KT_DATASHEET:.4f}\n")
     f.write(f"strong_joints:    {[i + 1 for i in strong]}\n")
+    f.write(f"cmd_std_ticks:    {fmt(cmd_std)}\n")
+    f.write(f"zero_cross_bias:  {fmt(zc_bias)}\n")
     f.write(f"R2:               {fmt(np.nan_to_num(R2))}\n")
     f.write(f"resid_rms_ticks:  {fmt(np.nan_to_num(resid_rms))}\n")
     f.write(f"shift_samples:    {s}\n")

@@ -20,10 +20,14 @@
  * El seguimiento no necesita ser bueno (sin compensación de fricción hay
  * stick-slip visible): el análisis usa solo corriente comandada vs medida.
  * Lo que importa es que la corriente comandada varíe: J2 por gravedad, J3 por
- * la fricción que el PD vence en cada inversión.
+ * la fricción que el PD vence en cada inversión, J4 por la fricción y la
+ * gravedad del efector (de ahí su oscilación).
  *
- * Trayectoria: la misma act1 del laboratorio de FL (senos de 1 rad/s en J1–J3,
- * J4 fijo en π/4), probada en el robot real dentro de límites y sin colisiones.
+ * Trayectoria: la act1 del laboratorio de FL (senos de 1 rad/s en J1–J3,
+ * probada en el robot real dentro de límites y sin colisiones) con J4
+ * oscilando ±0.25 rad alrededor de π/4 EN FASE con J1–J3: en act1 J4 queda
+ * fijo y su corriente casi constante (k no identificable). En fase, la pinza
+ * queda más lejos del robot que con J4 fijo (URDF: altura mínima 121 → 136 mm).
  *
  * Fases temporales (igual que los nodos hw_ de FL):
  *   [0, RAMP_TIME_S)                        rampa quíntica: reposo → trayectoria
@@ -106,7 +110,7 @@ static constexpr double MAX_TRACK_ERR = 0.5;   // [rad] error de seguimiento →
 using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 
 // ============================================================
-// Trayectoria deseada (articular act1, idéntica a hw_fl_control_node)
+// Trayectoria deseada (act1 de hw_fl_control_node con J4 oscilando)
 // ============================================================
 
 using omx::Reference;
@@ -115,9 +119,9 @@ static Reference desiredTrajectory(double t)
 {
   const double w = 1.0;
   Reference r;
-  r.q   << (PI/4.0)*std::sin(w*t),      -0.5 + 0.5*std::sin(w*t),    0.3 - 0.5*std::sin(w*t),   (PI/4.0);
-  r.dq  << (PI/4.0)*w*std::cos(w*t),     0.5*w*std::cos(w*t),        -0.5*w*std::cos(w*t),         0.0;
-  r.ddq << -(PI/4.0)*w*w*std::sin(w*t), -0.5*w*w*std::sin(w*t),      0.5*w*w*std::sin(w*t),        0.0;
+  r.q   << (PI/4.0)*std::sin(w*t),      -0.5 + 0.5*std::sin(w*t),    0.3 - 0.5*std::sin(w*t),   (PI/4.0) + 0.25*std::sin(w*t);
+  r.dq  << (PI/4.0)*w*std::cos(w*t),     0.5*w*std::cos(w*t),        -0.5*w*std::cos(w*t),        0.25*w*std::cos(w*t);
+  r.ddq << -(PI/4.0)*w*w*std::sin(w*t), -0.5*w*w*std::sin(w*t),      0.5*w*w*std::sin(w*t),      -0.25*w*w*std::sin(w*t);
   return r;
 }
 

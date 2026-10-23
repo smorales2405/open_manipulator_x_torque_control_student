@@ -3,15 +3,15 @@
 
     # ════════════════════════════════════════════════════════════════════════
     #  Modelo torque→corriente Dynamixel XM430-W350-T (OpenMANIPULATOR-X)
-    #  ENSAMBLADO por assemble_motor_params.py — 2026-10-19
+    #  ENSAMBLADO por assemble_motor_params.py — 2026-10-22
     #
     #  Modelo (por articulación):
     #    I[i] = alpha[i]·tau[i] + Fv[i]·dq[i] + Fc[i]·tanh(dq[i]/eps) + I_offset[i]
     #
     #  Cada parámetro proviene del método MÁS ADECUADO para identificarlo:
-    #   · alpha, I_offset → lazo de corriente I_meas = k·I_cmd + b (identify_alpha.py, log 40):
+    #   · alpha, I_offset → lazo de corriente I_meas = k·I_cmd + b (identify_alpha.py, log 60):
     #                       alpha = 208.54/k (kt datasheet 1.7826 N·m/A), I_offset = −b/k,
-    #                       k = [0.9995, 1.0000, 0.9990, 0.9995]
+    #                       k = [0.9987, 0.9991, 0.9996, 0.9973]
     #   · Fv, Fc          → barrido de VELOCIDAD CONSTANTE + reversión
     #                       emparejada por posición (identify_friction.py,
     #                       logs J1..J4: log 41, log 42, log 43, log 44).
@@ -26,10 +26,10 @@
     #    motor_epsilon_friction [rad/s]
     # ════════════════════════════════════════════════════════════════════════
     #                              J1        J2        J3        J4
-    motor_alpha:             [ 208.644,  208.543,  208.744,  208.644]   # lazo de corriente
+    motor_alpha:             [ 208.818,  208.727,  208.626,  209.100]   # lazo de corriente
     motor_Fv:                [   8.493,    0.000,    0.000,    0.520]   # barrido velocidad
     motor_Fc:                [   4.325,   19.163,   27.594,   10.601]   # barrido velocidad
-    motor_I_offset:          [  -0.103,   -0.562,   -0.440,   -0.613]   # lazo de corriente
+    motor_I_offset:          [  -0.130,   -0.440,   -0.518,   -0.499]   # lazo de corriente
     # Suavizado del tanh de Coulomb. Los nodos hw (hw_fl, hw_io, hw_tvlqr)
     # alimentan el tanh con la velocidad DESEADA (sin ruido): eps pequeno es
     # seguro y acorta la zona muerta en las inversiones de direccion
