@@ -222,6 +222,14 @@ open_manipulator_x_torque_control/
 │   ├── hw_friction_sweep_params.yaml     # Constant-velocity friction sweep parameters
 │   ├── fkin_params.yaml              # Forward kinematics display parameters
 │   └── fkin_rviz.rviz                # RViz config for FK visualization
+├── include/omx/                  # Shared C++ library omx_common (headers)
+│   ├── robot_model.hpp           # Pinocchio wrapper: M(q), n(q,dq), g(q), RNEA, EE kinematics, Slotine-Li
+│   ├── dynamixel_io.hpp          # Control table, units, calibration, block state read
+│   ├── dynamixel_arm.hpp         # Port/servo setup, read state, write currents, safe shutdown
+│   ├── motor_model.hpp           # Motor model, HW limits and torque→current conversion (motor YAML)
+│   ├── trajectory.hpp            # Quintic transition/return/blend/profile (joint and Cartesian)
+│   ├── ros_utils.hpp             # Motor-YAML node options, CSV logging, /joint_states listener
+│   └── types.hpp                 # Vec4, Mat4, Reference, CartRef
 ├── launch/
 │   ├── torque_sim.launch.py          # Main Gazebo simulation launcher
 │   ├── gravity_comp_gz.launch.py     # Gravity compensation in simulation
@@ -229,6 +237,7 @@ open_manipulator_x_torque_control/
 │   └── friction_sweep.launch.py      # Constant-velocity friction sweep on real HW
 │   # (HW gravity comp y TV-LQR se corren con `ros2 run`; auto-cargan motorXM430W350T_params.yaml)
 ├── src/
+│   ├── Common/                   # omx_common sources (the only unit that compiles Pinocchio)
 │   ├── Feedback Linearization/
 │   │   ├── student/                  # Templates for students to complete
 │   │   └── MATLAB/                   # Post-processing and plotting scripts
@@ -239,7 +248,9 @@ open_manipulator_x_torque_control/
 │   │   ├── instructor/               # Complete ROS 2 nodes (no modification needed)
 │   │   ├── references/               # Exported trajectory files from MATLAB
 │   │   └── MATLAB/                   # Trajectory generation and analysis scripts
+│   ├── Model Reference Adaptive Control/  # 12-parameter joint MRAC (sim and HW)
 │   ├── Gravity Compensation/         # Gravity compensation nodes (sim and HW)
+│   ├── Impedance/                    # Joint impedance control on real HW
 │   ├── Forward Kinematics/           # HW FK node and RViz display node
 │   ├── Identification/               # Torque→current model ID (excitation node + Python OLS/friction)
 │   └── Diagnostics/                  # Low-level torque diagnostic nodes
@@ -278,7 +289,7 @@ MAKEFLAGS="-j2" nice -n 15 colcon build --symlink-install --executor sequential 
 source install/setup.bash
 ```
 
-> **Why these flags:** every node includes Pinocchio, and each source file needs about 3.5 GB of RAM to compile. By default colcon passes `-j$(nproc)` to `make` (e.g. `-j20`), which can exhaust RAM and swap and get the terminal killed by the system. `MAKEFLAGS="-j2"` limits the parallel compile jobs (`CMAKE_BUILD_PARALLEL_LEVEL` does not work here: colcon overrides it), `nice -n 15` lowers the build's CPU priority so the desktop stays responsive, and `--executor sequential` builds one package at a time. With `-j2`, expect a peak of roughly 10–15 GB of RAM; raise the number only if you have memory to spare.
+> **Why these flags:** Pinocchio is compiled in a single source file, `src/Common/robot_model.cpp` (part of the shared library `omx_common`), which needs about 3.5 GB of RAM to compile; the nodes only include the lightweight `omx/*.hpp` headers and compile in a few seconds. By default colcon passes `-j$(nproc)` to `make` (e.g. `-j20`), which on a full rebuild still runs many compilers at once. `MAKEFLAGS="-j2"` limits the parallel compile jobs (`CMAKE_BUILD_PARALLEL_LEVEL` does not work here: colcon overrides it), `nice -n 15` lowers the build's CPU priority so the desktop stays responsive, and `--executor sequential` builds one package at a time. A clean build with `-j2` takes about 2 minutes; after editing a node, only that node is recompiled.
 
 ---
 

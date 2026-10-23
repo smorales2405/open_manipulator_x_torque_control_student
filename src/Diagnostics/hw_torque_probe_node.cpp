@@ -40,58 +40,22 @@
 
 #include "rclcpp/rclcpp.hpp"
 
-#include "dynamixel_sdk/dynamixel_sdk.h"
+#include "omx/dynamixel_io.hpp"
 
 using namespace std::chrono_literals;
 
 // ============================================================
-// Constantes Dynamixel (identicas a los nodos hw_)
+// Constantes Dynamixel: omx/dynamixel_io.hpp (tabla de control y unidades).
+// La calibracion NO se usa: este nodo trabaja en el marco CRUDO del encoder.
 // ============================================================
 
-static constexpr double PI = 3.14159265358979323846;
-static constexpr int    NUM_JOINTS = 4;
+using namespace omx;
 
-static const std::array<uint8_t, NUM_JOINTS> DXL_ID = {11, 12, 13, 14};
-static constexpr int    BAUDRATE         = 1000000;
-static constexpr double PROTOCOL_VERSION = 2.0;
-
-static constexpr uint16_t ADDR_OPERATING_MODE   = 11;
-static constexpr uint16_t ADDR_CURRENT_LIMIT    = 38;
-static constexpr uint16_t ADDR_TORQUE_ENABLE    = 64;
-static constexpr uint16_t ADDR_GOAL_CURRENT     = 102;
-static constexpr uint16_t ADDR_PRESENT_CURRENT  = 126;
-static constexpr uint16_t ADDR_PRESENT_POSITION = 132;
-
-static constexpr uint8_t CURRENT_CONTROL_MODE = 0;
-static constexpr uint8_t TORQUE_ENABLE_VAL    = 1;
-static constexpr uint8_t TORQUE_DISABLE_VAL   = 0;
-
-static constexpr double POS_UNIT_RAD         = 2.0 * PI / 4096.0;
-static constexpr double POS_UNIT_DEG         = 360.0 / 4096.0;
-static constexpr double CURRENT_UNIT_A       = 0.00269;
-static constexpr double TORQUE_CONSTANT_NM_A = 1.666;
-static constexpr double TORQUE_PER_CURRENT_TICK = TORQUE_CONSTANT_NM_A * CURRENT_UNIT_A;
+static constexpr double POS_UNIT_DEG = 360.0 / 4096.0;
 
 // Limites de seguridad para el diagnostico (corriente baja)
 static constexpr uint16_t CURRENT_LIMIT_REGISTER = 150;   // tope HW conservador
 static constexpr int16_t  SAFE_MAX_TICKS         = 100;   // |comando| maximo permitido
-
-// ============================================================
-// Utilidades
-// ============================================================
-
-static int32_t toSigned32(uint32_t v)
-{
-  if (v > 0x7FFFFFFFu) return -static_cast<int32_t>(0xFFFFFFFFu - v + 1u);
-  return static_cast<int32_t>(v);
-}
-
-static int16_t toSigned16(uint32_t v)
-{
-  const uint16_t w = static_cast<uint16_t>(v & 0xFFFFu);
-  if (w > 0x7FFFu) return -static_cast<int16_t>(0xFFFFu - w + 1u);
-  return static_cast<int16_t>(w);
-}
 
 // ============================================================
 // Nodo

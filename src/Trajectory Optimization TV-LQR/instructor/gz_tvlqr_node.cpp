@@ -54,6 +54,8 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 
+#include "omx/ros_utils.hpp"
+
 using namespace std::chrono_literals;
 
 #ifndef PACKAGE_DATA_DIR
@@ -127,8 +129,7 @@ class TVLQRSimNode : public rclcpp::Node
 public:
   TVLQRSimNode()
   : Node("gz_tvlqr_node"),
-    t_(0.0), refs_loaded_(false), N_(0), Ts_(0.05),
-    js_updated_(false)
+    t_(0.0), refs_loaded_(false), N_(0), Ts_(0.05)
   {
     // ── Parametros ──────────────────────────────────────────────────────────
     this->declare_parameter<int>        ("test_num",      1);
@@ -223,13 +224,6 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    joint_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
-      "/joint_states", 10,
-      [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
-        last_js_ = msg;
-        js_updated_ = true;
-      });
-
     timer_ = this->create_wall_timer(10ms, [this]() { tick(); });
   }
 
@@ -247,58 +241,31 @@ private:
   {
     const std::string data_dir = std::string(PACKAGE_DATA_DIR) + "/lab5/sim/act"
                                  + std::to_string(act_num);
-    std::filesystem::create_directories(data_dir);
     csv_path_ = data_dir + "/data_log_sim_lab5_" + std::to_string(test_num) + ".csv";
-    csv_.open(csv_path_);
-    if (!csv_.is_open()) {
-      RCLCPP_ERROR(get_logger(), "No se pudo crear: %s", csv_path_.c_str());
-      return;
-    }
-    csv_ << "t,"
-         << "q1,q2,q3,q4,"
-         << "dq1,dq2,dq3,dq4,"
-         << "q1_ref,q2_ref,q3_ref,q4_ref,"
-         << "dq1_ref,dq2_ref,dq3_ref,dq4_ref,"
-         << "tau1,tau2,tau3,tau4,"
-         << "u_ref1,u_ref2,u_ref3,u_ref4,"
-         << "x,y,z,phi,"
-         << "x_ref,y_ref,z_ref,phi_ref\n";
-    RCLCPP_INFO(get_logger(), "CSV: %s", csv_path_.c_str());
-  }
-
-  // ── Lectura de estados articulares ───────────────────────────────────────
-  void read_js(Eigen::Vector4d & q, Eigen::Vector4d & dq)
-  {
-    static const std::array<std::string, NARM> names = {
-      "joint1", "joint2", "joint3", "joint4"
-    };
-    q.setZero();
-    dq.setZero();
-    if (!last_js_) { return; }
-    const auto & js = *last_js_;
-    for (int j = 0; j < NARM; ++j) {
-      for (std::size_t i = 0; i < js.name.size(); ++i) {
-        if (js.name[i] == names[j]) {
-          if (i < js.position.size()) { q[j]  = js.position[i]; }
-          if (i < js.velocity.size()) { dq[j] = js.velocity[i]; }
-          break;
-        }
-      }
-    }
+    omx::openCsv(csv_, csv_path_,
+      "t,"
+      "q1,q2,q3,q4,"
+      "dq1,dq2,dq3,dq4,"
+      "q1_ref,q2_ref,q3_ref,q4_ref,"
+      "dq1_ref,dq2_ref,dq3_ref,dq4_ref,"
+      "tau1,tau2,tau3,tau4,"
+      "u_ref1,u_ref2,u_ref3,u_ref4,"
+      "x,y,z,phi,"
+      "x_ref,y_ref,z_ref,phi_ref",
+      get_logger());
   }
 
   // ── Tick de control a 100 Hz ─────────────────────────────────────────────
   void tick()
   {
-    if (!last_js_ || !refs_loaded_) { return; }
+    if (!js_.ready() || !refs_loaded_) { return; }
 
     // Esperar al menos un mensaje nuevo de joint_states antes de arrancar
-    if (!js_updated_) { return; }
-    js_updated_ = false;
+    if (!js_.takeNew()) { return; }
 
     // ── Leer estado articular ─────────────────────────────────────────────
     Eigen::Vector4d q, dq;
-    read_js(q, dq);
+    js_.read(q, dq);
 
     const Eigen::Vector4d y_actual = fkin(q);
 
@@ -378,12 +345,9 @@ private:
   std::vector<Eigen::Vector4d>                           u_ref_;
   std::vector<Eigen::Matrix<double,4,8,Eigen::ColMajor>> K_TV_;
 
-  bool            js_updated_;
-
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
-  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  joint_sub_;
+  omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)
   rclcpp::TimerBase::SharedPtr timer_;
-  sensor_msgs::msg::JointState::SharedPtr last_js_;
 
   std::ofstream csv_;
   std::string   csv_path_;

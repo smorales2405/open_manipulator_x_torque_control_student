@@ -71,10 +71,9 @@
 #include "std_msgs/msg/float64_multi_array.hpp"
 
 #include <Eigen/Core>
-#include <pinocchio/multibody.hpp>
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/algorithm/crba.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
+#include "omx/robot_model.hpp"
+#include "omx/ros_utils.hpp"
+#include "omx/trajectory.hpp"
 
 using namespace std::chrono_literals;
 
@@ -119,11 +118,7 @@ static const Eigen::Vector4d K_S      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Estructura de referencia articular ───────────────────────────────────────
-struct Reference {
-  Eigen::Vector4d q;    // posicion deseada   [rad]
-  Eigen::Vector4d dq;   // velocidad deseada  [rad/s]
-  Eigen::Vector4d ddq;  // aceleracion deseada [rad/s^2]
-};
+using omx::Reference;   // {q, dq, ddq}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  [SECCION 1] Trayectoria articular de referencia — COMPLETAR
@@ -164,40 +159,6 @@ static Reference desiredTrajectory(double t)
       0.0,   // joint3: COMPLETAR
       0.0;   // joint4: COMPLETAR
 
-  return ref;
-}
-
-// Transicion quintica generalizada: q0 (reposo) → goal en [0, T] (no modificar)
-// Condiciones de borde: p(0)=q0, dp(0)=0, ddp(0)=0;
-//                       p(T)=goal.q, dp(T)=goal.dq, ddp(T)=goal.ddq.
-// El empalme C2 con la trayectoria evita un escalon de dq_d al iniciar el
-// seguimiento (dq_d(0) = B*w != 0) y absorbe la caida por gravedad del brazo
-// entre el spawn de Gazebo y el arranque del nodo.
-static Reference transitionTrajectory(double t,
-                                      const Eigen::Vector4d & q0,
-                                      const Reference & goal,
-                                      double T)
-{
-  const double tc = std::min(t, T);
-  const double T2 = T * T;
-
-  Reference ref;
-  for (int i = 0; i < NARM; ++i) {
-    const double D  = goal.q[i] - q0[i];
-    const double vf = goal.dq[i];
-    const double af = goal.ddq[i];
-
-    const double a3 = ( 20.0*D -  8.0*vf*T +       af*T2) / (2.0*T*T2);
-    const double a4 = (-30.0*D + 14.0*vf*T - 2.0*af*T2) / (2.0*T2*T2);
-    const double a5 = ( 12.0*D -  6.0*vf*T +       af*T2) / (2.0*T2*T2*T);
-
-    const double t2 = tc * tc;
-    const double t3 = t2 * tc;
-
-    ref.q[i]   = q0[i] +      a3*t3 +      a4*t3*tc +      a5*t3*t2;
-    ref.dq[i]  =          3.0*a3*t2 +  4.0*a4*t3    +  5.0*a5*t2*t2;
-    ref.ddq[i] =          6.0*a3*tc + 12.0*a4*t2    + 20.0*a5*t3;
-  }
   return ref;
 }
 
@@ -269,18 +230,17 @@ public:
     const std::string urdf_path =
       std::string(PACKAGE_URDF_DIR) + "/open_manipulator_x.urdf";
     try {
-      pinocchio::urdf::buildModel(urdf_path, model_);
+      model_.load(urdf_path);
     } catch (const std::exception & e) {
       RCLCPP_FATAL(this->get_logger(), "Pinocchio buildModel: %s", e.what());
       throw;
     }
-    data_ = pinocchio::Data(model_);
 
     // Friccion articular del URDF (<dynamics damping/friction> joint1..4):
     // feedforward de viscosa + Coulomb, mismos valores que simula Gazebo
     // con damping_scale = 1.0 y friction_scale = 1.0. (No modificar)
-    fric_damping_ = model_.damping.head<NARM>();
-    fric_coulomb_ = model_.friction.head<NARM>();
+    fric_damping_ = model_.urdfDamping();
+    fric_coulomb_ = model_.urdfFriction();
 
     RCLCPP_INFO(this->get_logger(),
       "SMC articular — rho=%s  phi=%.3f  tau_max=%.2f N·m",
@@ -309,12 +269,6 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    joint_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
-      "/joint_states", 10,
-      [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
-        last_js_ = msg;
-      });
-
     timer_ = this->create_wall_timer(5ms, [this]() { tick(); });
   }
 
@@ -330,55 +284,27 @@ private:
   // ── CSV ───────────────────────────────────────────────────────────────────
   void open_csv(int test_num)
   {
-    std::filesystem::create_directories(
-      std::string(PACKAGE_DATA_DIR) + "/lab6/sim/act1");
-
     csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab6/sim/act1/gz_smc_joint_"
                 + rho_str_ + "_" + std::to_string(test_num) + ".csv";
-    csv_.open(csv_path_);
-    if (!csv_.is_open()) {
-      RCLCPP_ERROR(this->get_logger(), "No se pudo crear: %s", csv_path_.c_str());
-      return;
-    }
-    csv_ << "t,"
-         << "q1,q2,q3,q4,"
-         << "dq1,dq2,dq3,dq4,"
-         << "q1_des,q2_des,q3_des,q4_des,"
-         << "dq1_des,dq2_des,dq3_des,dq4_des,"
-         << "s1,s2,s3,s4,"
-         << "tau1,tau2,tau3,tau4\n";
-    RCLCPP_INFO(this->get_logger(), "CSV: %s", csv_path_.c_str());
-  }
-
-  // ── Lectura de estados articulares (por nombre, orden independiente) ───────
-  void read_js(Eigen::Vector4d & q, Eigen::Vector4d & dq)
-  {
-    static const std::array<std::string, NARM> names = {
-      "joint1", "joint2", "joint3", "joint4"
-    };
-    q.setZero();
-    dq.setZero();
-    if (!last_js_) { return; }
-    const auto & js = *last_js_;
-    for (int j = 0; j < NARM; ++j) {
-      for (std::size_t i = 0; i < js.name.size(); ++i) {
-        if (js.name[i] == names[j]) {
-          if (i < js.position.size()) { q[j]  = js.position[i]; }
-          if (i < js.velocity.size()) { dq[j] = js.velocity[i]; }
-          break;
-        }
-      }
-    }
+    omx::openCsv(csv_, csv_path_,
+      "t,"
+      "q1,q2,q3,q4,"
+      "dq1,dq2,dq3,dq4,"
+      "q1_des,q2_des,q3_des,q4_des,"
+      "dq1_des,dq2_des,dq3_des,dq4_des,"
+      "s1,s2,s3,s4,"
+      "tau1,tau2,tau3,tau4",
+      this->get_logger());
   }
 
   // ── Tick de control a 200 Hz ──────────────────────────────────────────────
   void tick()
   {
-    if (!last_js_) { return; }
+    if (!js_.ready()) { return; }
 
     // Leer estados articulares
     Eigen::Vector4d q, dq;
-    read_js(q, dq);
+    js_.read(q, dq);
 
     // Captura de la pose inicial (el brazo pudo caer por gravedad antes de
     // arrancar el nodo) + referencia segun fase: transicion quintica con
@@ -395,22 +321,14 @@ private:
     const Reference goal0 = desiredTrajectory(0.0);
     const bool in_trans   = (t_ < T_TRANS);
     const Reference ref   = in_trans
-      ? transitionTrajectory(t_, q0_, goal0, T_TRANS)
+      ? omx::quinticTransition(t_, T_TRANS, q0_, goal0)
       : desiredTrajectory(t_ - T_TRANS);
 
     // ── Dinamica nominal via Pinocchio ─────────────────────────────────────
-    Eigen::VectorXd q_pin  = Eigen::VectorXd::Zero(model_.nv);
-    Eigen::VectorXd dq_pin = Eigen::VectorXd::Zero(model_.nv);
-    q_pin.head<NARM>()  = q;
-    dq_pin.head<NARM>() = dq;
 
-    pinocchio::crba(model_, data_, q_pin);
-    data_.M.triangularView<Eigen::StrictlyLower>() =
-      data_.M.triangularView<Eigen::StrictlyUpper>().transpose();
-    const Eigen::Matrix4d M = data_.M.topLeftCorner<NARM, NARM>();
+    const Eigen::Matrix4d M = model_.massMatrix(q);
 
-    pinocchio::nonLinearEffects(model_, data_, q_pin, dq_pin);
-    const Eigen::Vector4d phi_nle = data_.nle.head<NARM>();
+    const Eigen::Vector4d phi_nle = model_.nonlinearEffects(q, dq);
 
     // Feedforward de friccion del URDF (infraestructura, no modificar):
     // viscosa con dq medida + Coulomb con la velocidad DESEADA ref.dq
@@ -491,8 +409,7 @@ private:
   }
 
   // ── Miembros ───────────────────────────────────────────────────────────────
-  pinocchio::Model model_;
-  pinocchio::Data  data_;
+  omx::RobotModel model_;
 
   Eigen::Vector4d fric_damping_;   // Fv del URDF [N·m·s/rad]
   Eigen::Vector4d fric_coulomb_;   // Fc del URDF [N·m]
@@ -507,9 +424,8 @@ private:
   double      phi_;
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
-  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  joint_sub_;
+  omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)
   rclcpp::TimerBase::SharedPtr timer_;
-  sensor_msgs::msg::JointState::SharedPtr last_js_;
 
   std::ofstream csv_;
   std::string   csv_path_;

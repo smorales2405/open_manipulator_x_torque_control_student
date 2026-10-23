@@ -20,7 +20,7 @@
 //  Infraestructura proporcionada (NO modificar):
 //    - Carga del modelo Pinocchio / URDF
 //    - Cinematica directa: posicion (x,y,z), angulo phi, Jacobiano J4
-//    - Termino de bias Jdot*qdot via getFrameClassicalAcceleration
+//    - Termino de bias Jdot*qdot (aceleracion clasica del efector con qddot = 0)
 //    - Calculo de M(q) y NLE(q,dq) mediante Pinocchio
 //    - Feedforward de la friccion del URDF (siempre activo, tras la ley de
 //      control): Pinocchio NO incluye <dynamics damping/friction> en M/NLE,
@@ -55,14 +55,11 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 
-#include <Eigen/Core>
+#include <Eigen/Dense>   // Core + descomposiciones (antes llegaban via Pinocchio)
 #include <Eigen/LU>
-#include <pinocchio/multibody.hpp>
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/algorithm/crba.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/algorithm/kinematics.hpp>
-#include <pinocchio/algorithm/frames.hpp>
+#include "omx/robot_model.hpp"
+#include "omx/ros_utils.hpp"
+#include "omx/trajectory.hpp"
 
 using namespace std::chrono_literals;
 
@@ -108,11 +105,7 @@ static constexpr double T_TRANS   = 3.0;    // duracion de la transicion inicial
 static const Eigen::Vector4d Y_START {0.0, 0.0, 0.0, 0.0};  // COMPLETAR 1b  [x, y, z, phi]
 
 // ── Estructura de referencia cartesiana ─────────────────────────────────────
-struct CartRef {
-  Eigen::Vector4d y;      // posicion deseada    [x, y, z, phi]
-  Eigen::Vector4d ydot;   // velocidad deseada   (1ra derivada analitica)
-  Eigen::Vector4d yddot;  // aceleracion deseada (2da derivada analitica)
-};
+using omx::CartRef;     // {y, ydot, yddot}, y = [x, y, z, phi]
 // ═══════════════════════════════════════════════════════════════════════════
 static CartRef circularTrajectory(double t)
 {
@@ -135,33 +128,6 @@ static CartRef circularTrajectory(double t)
 }
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── Transicion suave con polinomio de 5to orden ─────────────────────────────
-// Genera referencias continuas de y0 → y_goal en el intervalo [0, T] segundos.
-// Condiciones de frontera: s(0)=0, s(T)=1, s'(0)=s'(T)=0, s''(0)=s''(T)=0
-// (INFRAESTRUCTURA — no es necesario modificar)
-static CartRef transitionTrajectory(double t,
-                                    const Eigen::Vector4d & y0,
-                                    const Eigen::Vector4d & y_goal,
-                                    double T)
-{
-  const double tau  = std::min(1.0, t / T);
-  const double tau2 = tau  * tau;
-  const double tau3 = tau2 * tau;
-  const double tau4 = tau3 * tau;
-  const double tau5 = tau4 * tau;
-
-  const double s   =  10*tau3 - 15*tau4 +  6*tau5;
-  const double sd  = (30*tau2 - 60*tau3 + 30*tau4) / T;
-  const double sdd = (60*tau  - 180*tau2 + 120*tau3) / (T * T);
-
-  const Eigen::Vector4d delta = y_goal - y0;
-
-  CartRef ref;
-  ref.y     = y0 + s   * delta;
-  ref.ydot  =      sd  * delta;
-  ref.yddot =      sdd * delta;
-  return ref;
-}
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -206,26 +172,19 @@ public:
     // ── Carga del modelo Pinocchio ─────────────────────────────────────────
     const std::string urdf = std::string(PACKAGE_URDF_DIR) + "/open_manipulator_x.urdf";
     try {
-      pinocchio::urdf::buildModel(urdf, model_);
+      model_.load(urdf, EFF_FRAME);
     } catch (const std::exception & e) {
       RCLCPP_FATAL(this->get_logger(), "Pinocchio: %s", e.what());
       throw;
     }
-    data_ = pinocchio::Data(model_);
-
     // Friccion articular del URDF (<dynamics damping/friction>), parseada por
     // Pinocchio pero NO incluida en M/nle: usada por el feedforward (infra).
-    fric_damping_ = model_.damping.head<NARM>();
-    fric_coulomb_ = model_.friction.head<NARM>();
-
-    if (!model_.existFrame(EFF_FRAME)) {
-      throw std::runtime_error(std::string("Frame no encontrado: ") + EFF_FRAME);
-    }
-    frame_id_ = model_.getFrameId(EFF_FRAME);
+    fric_damping_ = model_.urdfDamping();
+    fric_coulomb_ = model_.urdfFriction();
 
     RCLCPP_INFO(this->get_logger(),
-      "Modelo cargado: nv=%d  frame='%s' (id=%lu)",
-      model_.nv, EFF_FRAME, frame_id_);
+      "Modelo cargado: nv=%d  frame='%s'",
+      model_.nv(), EFF_FRAME);
     RCLCPP_INFO(this->get_logger(),
       "Feedforward friccion URDF: damping=[%.4f %.4f %.4f %.4f]  coulomb=[%.4f %.4f %.4f %.4f]",
       fric_damping_[0], fric_damping_[1], fric_damping_[2], fric_damping_[3],
@@ -245,12 +204,6 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    joint_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
-      "/joint_states", 10,
-      [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
-        last_js_ = msg;
-      });
-
     timer_ = this->create_wall_timer(10ms, [this]() { tick(); });
   }
 
@@ -266,75 +219,40 @@ private:
   // ── CSV ───────────────────────────────────────────────────────────────────
   void open_csv(int test_num)
   {
-    std::filesystem::create_directories(std::string(PACKAGE_DATA_DIR) + "/lab4/sim/act2");
     csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab4/sim/act2/gz_io_data_"
                 + std::to_string(test_num) + ".csv";
-    csv_.open(csv_path_);
-    if (!csv_.is_open()) {
-      RCLCPP_ERROR(this->get_logger(), "No se pudo crear: %s", csv_path_.c_str());
-      return;
-    }
-    csv_ << "t,"
-         << "q1,q2,q3,q4,"
-         << "x,y,z,phi,"
-         << "x_des,y_des,z_des,phi_des,"
-         << "xdot,ydot,zdot,phidot,"
-         << "xdot_des,ydot_des,zdot_des,phidot_des,"
-         << "tau1,tau2,tau3,tau4\n";
-    RCLCPP_INFO(this->get_logger(), "CSV: %s", csv_path_.c_str());
-  }
-
-  // ── Lectura de estados articulares (por nombre, independiente del orden) ──
-  void read_js(Eigen::Vector4d & q, Eigen::Vector4d & dq)
-  {
-    static const std::array<std::string, NARM> names = {
-      "joint1", "joint2", "joint3", "joint4"
-    };
-    q.setZero();
-    dq.setZero();
-    if (!last_js_) { return; }
-    const auto & js = *last_js_;
-    for (int j = 0; j < NARM; ++j) {
-      for (std::size_t i = 0; i < js.name.size(); ++i) {
-        if (js.name[i] == names[j]) {
-          if (i < js.position.size()) { q[j]  = js.position[i]; }
-          if (i < js.velocity.size()) { dq[j] = js.velocity[i]; }
-          break;
-        }
-      }
-    }
+    omx::openCsv(csv_, csv_path_,
+      "t,"
+      "q1,q2,q3,q4,"
+      "x,y,z,phi,"
+      "x_des,y_des,z_des,phi_des,"
+      "xdot,ydot,zdot,phidot,"
+      "xdot_des,ydot_des,zdot_des,phidot_des,"
+      "tau1,tau2,tau3,tau4",
+      this->get_logger());
   }
 
   // ── Tick de control a 100 Hz ──────────────────────────────────────────────
   void tick()
   {
-    if (!last_js_) { return; }
+    if (!js_.ready()) { return; }
 
     // ── 1. Leer estado articular ───────────────────────────────────────────
     Eigen::Vector4d q, dq;
-    read_js(q, dq);
-
-    Eigen::VectorXd q_pin  = Eigen::VectorXd::Zero(model_.nv);
-    Eigen::VectorXd dq_pin = Eigen::VectorXd::Zero(model_.nv);
-    q_pin.head<NARM>()  = q;
-    dq_pin.head<NARM>() = dq;
+    js_.read(q, dq);
 
     // ── 2. Cinematica directa y Jacobiano ─────────────────────────────────
-    // computeFrameJacobian actualiza la FK internamente.
-    // J6 (6×nv): filas {vx,vy,vz,wx,wy,wz} en marco LOCAL_WORLD_ALIGNED.
-    Eigen::MatrixXd J6 = Eigen::MatrixXd::Zero(6, model_.nv);
-    pinocchio::computeFrameJacobian(
-      model_, data_, q_pin, frame_id_, pinocchio::LOCAL_WORLD_ALIGNED, J6);
+    // eeKinematics: posicion p, jacobiano lineal J (3×4, filas {vx,vy,vz}) y
+    // bias J̇·q̇ del efector, en marco LOCAL_WORLD_ALIGNED.
+    const auto ee = model_.eeKinematics(q, dq);   // p, J lineal y J̇·q̇ del efector
 
     // Posicion del efector final
-    const Eigen::Vector3d p = data_.oMf[frame_id_].translation();
+    const Eigen::Vector3d p = ee.p;
     const double phi = q[1] + q[2] + q[3];  // analitico: phi = q2 + q3 + q4
 
     // Jacobiano de tarea 4×4: filas {vx, vy, vz, dphi/dq} — columnas {j1..j4}
     Eigen::Matrix4d J4;
-    J4.row(0) = J6.row(0).head<NARM>();
-    J4.row(1) = J6.row(1).head<NARM>();
-    J4.row(2) = J6.row(2).head<NARM>();
+    J4.topRows<3>() = ee.J;
     J4.row(3) << 0.0, 1.0, 1.0, 1.0;   // dphi/dq = [0,1,1,1] (constante analitico)
 
     // Velocidad de la salida de tarea actual:  ydot = J4 * dq
@@ -343,25 +261,12 @@ private:
     // ── 3. Termino de bias  Jdot*qdot ─────────────────────────────────────
     // Se obtiene como la aceleracion clasica del frame con qddot = 0:
     //   a_clasica(q, dq, 0) = Jdot(q,dq) * dq
-    pinocchio::forwardKinematics(
-      model_, data_, q_pin, dq_pin, Eigen::VectorXd::Zero(model_.nv));
-    const pinocchio::Motion bias =
-      pinocchio::getFrameClassicalAcceleration(
-        model_, data_, frame_id_, pinocchio::LOCAL_WORLD_ALIGNED);
     Eigen::Vector4d jdqd;
-    jdqd << bias.linear()[0],
-            bias.linear()[1],
-            bias.linear()[2],
-            0.0;   // Jdot_phi * qdot = 0 (fila [0,1,1,1] es constante)
+    jdqd << ee.dJdq, 0.0;   // Jdot_phi * qdot = 0 (fila [0,1,1,1] es constante)
 
     // ── 4. Dinamica: M(q) y b(q,dq) ──────────────────────────────────────
-    pinocchio::crba(model_, data_, q_pin);
-    data_.M.triangularView<Eigen::StrictlyLower>() =
-      data_.M.triangularView<Eigen::StrictlyUpper>().transpose();
-    pinocchio::nonLinearEffects(model_, data_, q_pin, dq_pin);
-
-    const Eigen::Matrix4d M4   = data_.M.topLeftCorner<NARM, NARM>();
-    const Eigen::Vector4d nle4 = data_.nle.head<NARM>();
+    const Eigen::Matrix4d M4   = model_.massMatrix(q);
+    const Eigen::Vector4d nle4 = model_.nonlinearEffects(q, dq);
 
     // ── 5. Salida de tarea y captura de condicion inicial ─────────────────
     const Eigen::Vector4d y { p[0], p[1], p[2], phi };
@@ -381,7 +286,7 @@ private:
     // [t_run+RETURN_TIME_S, ...)    : pausa en reposo en y0 (luego torque cero)
     CartRef ref;
     if (t_ < T_TRANS) {
-      ref = transitionTrajectory(t_, y0_, Y_START, T_TRANS);
+      ref = omx::quinticTransition(t_, T_TRANS, y0_, CartRef{Y_START, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero()});
     } else if (t_run_ <= 0.0 || t_ < t_run_) {
       ref = circularTrajectory(t_ - T_TRANS);
     } else if (t_ < t_run_ + RETURN_TIME_S) {
@@ -390,8 +295,7 @@ private:
           "Iniciando retorno cartesiano a y_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
         return_logged_ = true;
       }
-      const Eigen::Vector4d y_at_trun = circularTrajectory(t_run_ - T_TRANS).y;
-      ref = transitionTrajectory(t_ - t_run_, y_at_trun, y0_, RETURN_TIME_S);
+      ref = omx::quinticReturn(t_ - t_run_, RETURN_TIME_S, circularTrajectory(t_run_ - T_TRANS), y0_);
     } else {
       ref.y = y0_;
       ref.ydot.setZero();
@@ -491,9 +395,7 @@ private:
   }
 
   // ── Miembros ──────────────────────────────────────────────────────────────
-  pinocchio::Model      model_;
-  pinocchio::Data       data_;
-  pinocchio::FrameIndex frame_id_;
+  omx::RobotModel model_;
 
   double t_;
   double t_run_;
@@ -506,9 +408,8 @@ private:
   bool            return_logged_{false};
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
-  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  joint_sub_;
+  omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)
   rclcpp::TimerBase::SharedPtr timer_;
-  sensor_msgs::msg::JointState::SharedPtr last_js_;
 
   std::ofstream csv_;
   std::string   csv_path_;

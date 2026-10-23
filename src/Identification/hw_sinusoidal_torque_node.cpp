@@ -59,7 +59,9 @@
 
 #include <Eigen/Dense>
 
-#include "dynamixel_sdk/dynamixel_sdk.h"
+#include "omx/dynamixel_io.hpp"
+#include "omx/motor_model.hpp"   // HwLimits
+#include "omx/trajectory.hpp"     // quinticProfile
 
 #ifndef PACKAGE_DATA_DIR
 #define PACKAGE_DATA_DIR "."
@@ -71,62 +73,18 @@
 using namespace std::chrono_literals;
 
 // ============================================================
-// Constantes Dynamixel / conversión de unidades
+// Constantes y conversiones de los servos: omx/dynamixel_io.hpp
+// (tabla de control, unidades, modos de operacion). Calibracion y
+// limites: omx::declareCalibration / omx::declareHwLimits.
 // ============================================================
 
-static constexpr double PI         = 3.14159265358979323846;
-static constexpr int    NUM_JOINTS = 4;
-
-static const std::array<uint8_t, NUM_JOINTS> DXL_ID = {11, 12, 13, 14};
-static constexpr int    BAUDRATE         = 1000000;
-static constexpr double PROTOCOL_VERSION = 2.0;
-
-// Control Table addresses (XM430-W350)
-static constexpr uint16_t ADDR_PROFILE_ACC      = 108;
-static constexpr uint16_t ADDR_PROFILE_VEL      = 112;
-static constexpr uint16_t ADDR_OPERATING_MODE   = 11;
-static constexpr uint16_t ADDR_CURRENT_LIMIT    = 38;
-static constexpr uint16_t ADDR_TORQUE_ENABLE    = 64;
-static constexpr uint16_t ADDR_GOAL_CURRENT     = 102;
-static constexpr uint16_t ADDR_GOAL_VELOCITY    = 104;
-static constexpr uint16_t ADDR_GOAL_POSITION    = 116;
-static constexpr uint16_t ADDR_PRESENT_CURRENT  = 126;
-static constexpr uint16_t ADDR_PRESENT_VELOCITY = 128;
-static constexpr uint16_t ADDR_PRESENT_POSITION = 132;
-
-static constexpr uint16_t LEN_GOAL_CURRENT      = 2;
-static constexpr uint16_t LEN_GOAL_VELOCITY     = 4;
-static constexpr uint16_t LEN_GOAL_POSITION      = 4;
-static constexpr uint16_t LEN_PRESENT_CURRENT   = 2;
-static constexpr uint16_t LEN_PRESENT_VELOCITY  = 4;
-static constexpr uint16_t LEN_PRESENT_POSITION  = 4;
-
-static constexpr uint8_t CURRENT_CONTROL_MODE   = 0;
-static constexpr uint8_t VELOCITY_CONTROL_MODE  = 1;
-static constexpr uint8_t POSITION_CONTROL_MODE  = 3;
-static constexpr uint8_t TORQUE_ENABLE_VAL      = 1;
-static constexpr uint8_t TORQUE_DISABLE_VAL     = 0;
-
-static constexpr double POS_UNIT_RAD            = 2.0 * PI / 4096.0;
-static constexpr double VEL_UNIT_RAD_S          = 0.229 * 2.0 * PI / 60.0;
-
-static const std::array<int32_t, NUM_JOINTS> JOINT_ZERO_TICK = {2048, 2048, 2048, 2048};
-static const std::array<double,  NUM_JOINTS> ENCODER_SIGN    = {+1.0, +1.0, +1.0, +1.0};
-static const std::array<double,  NUM_JOINTS> CURRENT_SIGN    = {+1.0, +1.0, +1.0, +1.0};
-
-static constexpr uint16_t CURRENT_LIMIT_REGISTER  = 350;
-static constexpr int16_t  CURRENT_CMD_LIMIT_J123  = 257;
-static constexpr int16_t  CURRENT_CMD_LIMIT_J4    = 257;
-static constexpr int16_t  CURRENT_MEASURED_PEAK   = 313;
-static constexpr double   TAU_MAX                 = 1.2;   // [N·m]
+using namespace omx;
 
 // Retorno final a la posición inicial (ver cabecera)
 static constexpr double BRAKE_TIME_S  = 0.5;   // frenado de los joints en velocity
 static constexpr double RETURN_TIME_S = 3.0;   // duración mínima del retorno quíntico
 static constexpr double RETURN_VMAX   = 0.8;   // [rad/s] velocidad pico máx. del retorno
 static constexpr double HOLD_TIME_S   = 0.5;   // pausa en q_inicial antes de cortar torque
-
-using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 
 // ============================================================
 // Fases de operación
@@ -138,41 +96,13 @@ enum class Phase { SETTLING, RAMP, RUN, BRAKE, RETURN, HOLD };
 // Utilidades de conversión
 // ============================================================
 
-static int32_t toSigned32(uint32_t v)
-{
-  if (v > 0x7FFFFFFFu) return -static_cast<int32_t>(0xFFFFFFFFu - v + 1u);
-  return static_cast<int32_t>(v);
-}
-
-static int16_t toSigned16(uint32_t v)
-{
-  const uint16_t w = static_cast<uint16_t>(v & 0xFFFFu);
-  if (w > 0x7FFFu) return -static_cast<int16_t>(0xFFFFu - w + 1u);
-  return static_cast<int16_t>(w);
-}
-
-static int32_t wrappedTickDiff(int32_t raw, int32_t zero)
-{
-  int32_t d = raw - zero;
-  while (d >  2048) d -= 4096;
-  while (d < -2048) d += 4096;
-  return d;
-}
-
 // Convierte pos_rad [rad] al tick absoluto del servo
-static int32_t radToTicks(int joint_idx, double pos_rad)
+static int32_t radToTicks(const Calibration& calib, int joint_idx, double pos_rad)
 {
   const int32_t t = static_cast<int32_t>(std::round(
-    JOINT_ZERO_TICK[joint_idx]
-    + ENCODER_SIGN[joint_idx] * pos_rad / POS_UNIT_RAD));
+    calib.joint_zero_tick[joint_idx]
+    + calib.encoder_sign(joint_idx) * pos_rad / POS_UNIT_RAD));
   return std::clamp(t, 0, 4095);
-}
-
-static void currentToBytes(int16_t cur, uint8_t p[2])
-{
-  const uint16_t w = static_cast<uint16_t>(cur);
-  p[0] = DXL_LOBYTE(w);
-  p[1] = DXL_HIBYTE(w);
 }
 
 static void positionToBytes(int32_t ticks, uint8_t p[4])
@@ -192,12 +122,6 @@ static void velocityToBytes(int32_t ticks, uint8_t p[4])
   p[1] = DXL_HIBYTE(DXL_LOWORD(u));
   p[2] = DXL_LOBYTE(DXL_HIWORD(u));
   p[3] = DXL_HIBYTE(DXL_HIWORD(u));
-}
-
-static int16_t clampCurrent(double x, int16_t lim)
-{
-  return static_cast<int16_t>(std::lround(
-    std::min(std::max(x, -static_cast<double>(lim)), static_cast<double>(lim))));
 }
 
 // ============================================================
@@ -245,6 +169,10 @@ public:
     this->declare_parameter<dvec>  ("motor_Fc",               dvec{0.0,  0.0,  0.0,  0.0 });
     this->declare_parameter<dvec>  ("motor_I_offset",         dvec{0.0,  0.0,  0.0,  0.0 });
     this->declare_parameter<double>("motor_epsilon_friction", 0.05);
+
+    // Calibracion y limites: defaults del YAML del motor (motorXM430W350T_params.yaml)
+    calib_  = omx::declareCalibration(*this);
+    limits_ = omx::declareHwLimits(*this);
 
     // ── Lectura ──────────────────────────────────────────────────────────────
     port_name_               = get_parameter("port_name").as_string();
@@ -325,9 +253,9 @@ public:
           "J%d [current]  A=%.3f  B=%.3f  w=%.3f rad/s  (inicio tras settling)",
           i+1, A_dc_(i), B_amp_(i), w_freq_(i));
         const double tau_pk = std::abs(A_dc_(i)) + std::abs(B_amp_(i));
-        if (tau_pk > TAU_MAX)
+        if (tau_pk > limits_.tau_max)
           RCLCPP_WARN(get_logger(),
-            "J%d: |A|+|B|=%.3f N·m > TAU_MAX=%.3f N·m → se saturará", i+1, tau_pk, TAU_MAX);
+            "J%d: |A|+|B|=%.3f N·m > TAU_MAX=%.3f N·m → se saturará", i+1, tau_pk, limits_.tau_max);
       } else if (joint_mode_[i] == "velocity") {
         std::string vl;
         for (double v : vel_list_) vl += std::to_string(v).substr(0, 4) + " ";
@@ -344,8 +272,8 @@ public:
             "J%d [position] setpoint=%.4f rad (%.2f°)  profile_vel=%d ticks",
             i+1, A_pos_(i), A_pos_(i)*180.0/PI, pos_profile_vel_);
         }
-        const double abs_ticks = JOINT_ZERO_TICK[i]
-          + ENCODER_SIGN[i] * A_pos_(i) / POS_UNIT_RAD;
+        const double abs_ticks = calib_.joint_zero_tick[i]
+          + calib_.encoder_sign(i) * A_pos_(i) / POS_UNIT_RAD;
         if (abs_ticks < 0.0 || abs_ticks > 4095.0)
           RCLCPP_WARN(get_logger(),
             "J%d: A_pos=%.4f rad → %.1f ticks FUERA del rango [0,4095]",
@@ -428,7 +356,7 @@ private:
         const double tp = t_ctrl - t_ramp_;
         tau(i) = A_dc_(i) + B_amp_(i) * std::sin(w_freq_(i) * tp);
       }
-      tau(i) = std::clamp(tau(i), -TAU_MAX, TAU_MAX);
+      tau(i) = std::clamp(tau(i), -limits_.tau_max, limits_.tau_max);
     }
     return tau;
   }
@@ -506,10 +434,6 @@ private:
 
   std::array<int16_t, NUM_JOINTS> torque_to_current(const Vec4& tau, const Vec4& dq) const
   {
-    static const std::array<int16_t, NUM_JOINTS> cur_lim = {
-      CURRENT_CMD_LIMIT_J123, CURRENT_CMD_LIMIT_J123,
-      CURRENT_CMD_LIMIT_J123, CURRENT_CMD_LIMIT_J4
-    };
     std::array<int16_t, NUM_JOINTS> cmd{};
     for (int i = 0; i < NUM_JOINTS; ++i) {
       if (joint_mode_[i] != "current") { cmd[i] = 0; continue; }
@@ -517,7 +441,7 @@ private:
                      + motor_Fv_(i)    * dq(i)
                      + motor_Fc_(i)    * std::tanh(dq(i) / motor_epsilon_)
                      + motor_I_offset_(i);
-      cmd[i] = clampCurrent(CURRENT_SIGN[i] * ENCODER_SIGN[i] * I, cur_lim[i]);
+      cmd[i] = clampCurrent(calib_.current_sign(i) * calib_.encoder_sign(i) * I, limits_.current_cmd_limit[i]);
     }
     return cmd;
   }
@@ -551,7 +475,7 @@ private:
       for (int i = 0; i < NUM_JOINTS; ++i) {
         const uint8_t id = DXL_ID[i];
         if (!dxl_write1(id, ADDR_OPERATING_MODE, POSITION_CONTROL_MODE, "set pos mode") ||
-            !dxl_write2(id, ADDR_CURRENT_LIMIT, CURRENT_LIMIT_REGISTER, "set limit"))
+            !dxl_write2(id, ADDR_CURRENT_LIMIT, limits_.current_limit_register, "set limit"))
           { port_handler_->closePort(); return false; }
         if (!dxl_write4(id, ADDR_PROFILE_ACC, static_cast<uint32_t>(pos_profile_acc_),
                         "set profile acc") ||
@@ -568,18 +492,8 @@ private:
       RCLCPP_WARN(get_logger(), "enable_torque=false — motores en modo lectura.");
     }
 
-    // SyncRead (todos los joints)
-    grp_pos_  = std::make_unique<dynamixel::GroupSyncRead>(
-      port_handler_, packet_handler_, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
-    grp_vel_  = std::make_unique<dynamixel::GroupSyncRead>(
-      port_handler_, packet_handler_, ADDR_PRESENT_VELOCITY, LEN_PRESENT_VELOCITY);
-    grp_cur_  = std::make_unique<dynamixel::GroupSyncRead>(
-      port_handler_, packet_handler_, ADDR_PRESENT_CURRENT,  LEN_PRESENT_CURRENT);
-    for (const auto id : DXL_ID) {
-      grp_pos_->addParam(id);
-      grp_vel_->addParam(id);
-      grp_cur_->addParam(id);
-    }
+    // SyncRead del bloque de estado (corriente+velocidad+posicion, todos los joints)
+    reader_ = std::make_unique<StateReader>(port_handler_, packet_handler_, get_logger());
 
     // SyncWrite — grupos separados
     grp_wcur_ = std::make_unique<dynamixel::GroupSyncWrite>(
@@ -606,13 +520,13 @@ private:
       if (joint_mode_[i] == "current") {
         dxl_write1(id, ADDR_TORQUE_ENABLE,  TORQUE_DISABLE_VAL,     "mode-switch disable");
         dxl_write1(id, ADDR_OPERATING_MODE, CURRENT_CONTROL_MODE,   "set current mode");
-        dxl_write2(id, ADDR_CURRENT_LIMIT,  CURRENT_LIMIT_REGISTER, "set limit");
+        dxl_write2(id, ADDR_CURRENT_LIMIT,  limits_.current_limit_register, "set limit");
         dxl_write1(id, ADDR_TORQUE_ENABLE,  TORQUE_ENABLE_VAL,      "mode-switch enable");
         RCLCPP_INFO(get_logger(), "DXL ID %d → CURRENT mode", static_cast<int>(id));
       } else if (joint_mode_[i] == "velocity") {
         dxl_write1(id, ADDR_TORQUE_ENABLE,  TORQUE_DISABLE_VAL,     "mode-switch disable");
         dxl_write1(id, ADDR_OPERATING_MODE, VELOCITY_CONTROL_MODE,  "set velocity mode");
-        dxl_write2(id, ADDR_CURRENT_LIMIT,  CURRENT_LIMIT_REGISTER, "set limit");
+        dxl_write2(id, ADDR_CURRENT_LIMIT,  limits_.current_limit_register, "set limit");
         dxl_write1(id, ADDR_TORQUE_ENABLE,  TORQUE_ENABLE_VAL,      "mode-switch enable");
         RCLCPP_INFO(get_logger(), "DXL ID %d → VELOCITY mode", static_cast<int>(id));
       }
@@ -636,7 +550,7 @@ private:
     dxl_write1(id, ADDR_TORQUE_ENABLE,  TORQUE_DISABLE_VAL,    "hold disable");
     dxl_write1(id, ADDR_OPERATING_MODE, POSITION_CONTROL_MODE, "set pos mode (retorno)");
     dxl_write4(id, ADDR_GOAL_POSITION,
-               static_cast<uint32_t>(radToTicks(i, q_hold)), "goal hold");
+               static_cast<uint32_t>(radToTicks(calib_, i, q_hold)), "goal hold");
     dxl_write1(id, ADDR_TORQUE_ENABLE,  TORQUE_ENABLE_VAL,     "hold enable");
     dxl_write4(id, ADDR_PROFILE_ACC, static_cast<uint32_t>(pos_profile_acc_), "profile acc");
     dxl_write4(id, ADDR_PROFILE_VEL, static_cast<uint32_t>(pos_profile_vel_), "profile vel");
@@ -746,42 +660,12 @@ private:
     return true;
   }
 
-  bool read_state(Vec4& q, Vec4& dq, std::array<int16_t, NUM_JOINTS>& cur)
-  {
-    if (grp_pos_->txRxPacket() != COMM_SUCCESS ||
-        grp_vel_->txRxPacket() != COMM_SUCCESS ||
-        grp_cur_->txRxPacket() != COMM_SUCCESS) {
-      RCLCPP_ERROR(get_logger(), "SyncRead fallo");
-      return false;
-    }
-    for (int i = 0; i < NUM_JOINTS; ++i) {
-      const uint8_t id = DXL_ID[i];
-      if (!grp_pos_->isAvailable(id, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION) ||
-          !grp_vel_->isAvailable(id, ADDR_PRESENT_VELOCITY, LEN_PRESENT_VELOCITY) ||
-          !grp_cur_->isAvailable(id, ADDR_PRESENT_CURRENT,  LEN_PRESENT_CURRENT)) {
-        RCLCPP_ERROR(get_logger(), "[ID %d] dato no disponible", id);
-        return false;
-      }
-      const int32_t rp = toSigned32(static_cast<uint32_t>(
-        grp_pos_->getData(id, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION)));
-      const int32_t rv = toSigned32(static_cast<uint32_t>(
-        grp_vel_->getData(id, ADDR_PRESENT_VELOCITY, LEN_PRESENT_VELOCITY)));
-      const int16_t rc = toSigned16(static_cast<uint32_t>(
-        grp_cur_->getData(id, ADDR_PRESENT_CURRENT,  LEN_PRESENT_CURRENT)));
-
-      q(i)   = ENCODER_SIGN[i] * static_cast<double>(wrappedTickDiff(rp, JOINT_ZERO_TICK[i])) * POS_UNIT_RAD;
-      dq(i)  = ENCODER_SIGN[i] * static_cast<double>(rv) * VEL_UNIT_RAD_S;
-      cur[i] = rc;
-    }
-    return true;
-  }
-
   // Envía goal position a TODOS los joints (settling y retorno final)
   bool send_positions_all(const Vec4& target)
   {
     uint8_t p[NUM_JOINTS][4];
     for (int i = 0; i < NUM_JOINTS; ++i) {
-      positionToBytes(radToTicks(i, target(i)), p[i]);
+      positionToBytes(radToTicks(calib_, i, target(i)), p[i]);
       grp_wpos_->addParam(DXL_ID[i], p[i]);
     }
     const int r = grp_wpos_->txPacket();
@@ -802,7 +686,7 @@ private:
     bool any = false;
     for (int i = 0; i < NUM_JOINTS; ++i) {
       if (joint_mode_[i] != "position") continue;
-      positionToBytes(radToTicks(i, pos_ref(i)), p[i]);
+      positionToBytes(radToTicks(calib_, i, pos_ref(i)), p[i]);
       grp_wpos_->addParam(DXL_ID[i], p[i]);
       any = true;
     }
@@ -826,7 +710,7 @@ private:
     for (int i = 0; i < NUM_JOINTS; ++i) {
       if (joint_mode_[i] != "velocity") continue;
       const int32_t ticks = static_cast<int32_t>(std::lround(
-        ENCODER_SIGN[i] * vel_cmd(i) / VEL_UNIT_RAD_S));
+        calib_.encoder_sign(i) * vel_cmd(i) / VEL_UNIT_RAD_S));
       velocityToBytes(ticks, p[i]);
       grp_wvel_->addParam(DXL_ID[i], p[i]);
       any = true;
@@ -888,7 +772,7 @@ private:
     Vec4 q = Vec4::Zero(), dq = Vec4::Zero();
     std::array<int16_t, NUM_JOINTS> cur_meas{};
     if (hw_active_) {
-      if (!read_state(q, dq, cur_meas)) {
+      if (!reader_->read(calib_, q, dq, cur_meas)) {
         emergency_stop("SyncRead fallido"); return;
       }
     }
@@ -948,7 +832,7 @@ private:
     } else if (phase_ == Phase::RETURN) {
       // Quíntica 10s³-15s⁴+6s⁵ (vel. y acel. nulas en ambos extremos)
       const double s = std::clamp((t - t_phase0_) / T_ret_, 0.0, 1.0);
-      const double h = s * s * s * (10.0 - 15.0 * s + 6.0 * s * s);
+      const double h = quinticProfile(s);
       pos_cmd_rad = q_ret0_ + h * (q_initial_ - q_ret0_);
       if (cmd_ok && !send_positions_all(pos_cmd_rad)) {
         emergency_stop("SyncWrite position (retorno) fallo"); return;
@@ -1003,7 +887,7 @@ private:
     // ── 3. Verificación de corriente medida ───────────────────────────────
     if (hw_active_) {
       for (int i = 0; i < NUM_JOINTS; ++i) {
-        if (std::abs(cur_meas[i]) > CURRENT_MEASURED_PEAK) {
+        if (std::abs(cur_meas[i]) > limits_.current_measured_peak) {
           emergency_stop("Corriente insegura J" + std::to_string(i + 1)
                          + ": " + std::to_string(cur_meas[i]) + " ticks");
           return;
@@ -1073,10 +957,12 @@ private:
 
   Vec4   motor_alpha_, motor_Fv_, motor_Fc_, motor_I_offset_;
   double motor_epsilon_;
+  Calibration calib_;    // ceros y signos (YAML del motor)
+  HwLimits    limits_;   // limites de corriente y torque (YAML del motor)
 
   dynamixel::PortHandler*   port_handler_{nullptr};
   dynamixel::PacketHandler* packet_handler_{nullptr};
-  std::unique_ptr<dynamixel::GroupSyncRead>  grp_pos_, grp_vel_, grp_cur_;
+  std::unique_ptr<StateReader>               reader_;
   std::unique_ptr<dynamixel::GroupSyncWrite> grp_wcur_, grp_wpos_, grp_wvel_;
 
   bool  hw_active_;

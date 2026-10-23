@@ -85,11 +85,9 @@
 #include "std_msgs/msg/float64_multi_array.hpp"
 
 #include <Eigen/Core>
-#include <pinocchio/multibody.hpp>
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/algorithm/crba.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/algorithm/regressor.hpp>
+#include "omx/robot_model.hpp"
+#include "omx/ros_utils.hpp"
+#include "omx/trajectory.hpp"
 
 using namespace std::chrono_literals;
 
@@ -188,9 +186,7 @@ static const Vec12 A_MAX =
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Estructura de referencia articular ───────────────────────────────────────
-struct Reference {
-  Vec4 q, dq, ddq;
-};
+using omx::Reference;   // {q, dq, ddq}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  [SECCION 1] Trayectoria articular de referencia — COMPLETAR
@@ -249,67 +245,6 @@ static Reference desiredTrajectory(double t)
   return ref;
 }
 
-// ── Homing quintico: de la postura medida (q0,v0, acc 0) en t=0 hasta el ────
-//   REPOSO en los centros del multiseno (q_d(0), 0, 0) en t=T_HOME.
-//   (Infraestructura, no modificar)
-static Reference homingTrajectory(double t, const Vec4 & q0, const Vec4 & v0)
-{
-  const Reference end = desiredTrajectory(0.0);
-  const double T = T_HOME;
-  Reference ref;
-  for (int i = 0; i < NARM; ++i) {
-    const double h  = end.q[i] - q0[i];
-    const double vf = end.dq[i];
-    const double af = end.ddq[i];
-    const double c0 = q0[i];
-    const double c1 = v0[i];
-    const double c3 = ( 20.0*h - (8.0*vf + 12.0*v0[i])*T + af*T*T) / (2.0*T*T*T);
-    const double c4 = (-30.0*h + (14.0*vf + 16.0*v0[i])*T - 2.0*af*T*T) / (2.0*T*T*T*T);
-    const double c5 = ( 12.0*h -  6.0*(vf + v0[i])*T + af*T*T) / (2.0*T*T*T*T*T);
-    ref.q[i]   = c0 + c1*t + c3*t*t*t + c4*t*t*t*t + c5*t*t*t*t*t;
-    ref.dq[i]  = c1 + 3.0*c3*t*t + 4.0*c4*t*t*t + 5.0*c5*t*t*t*t;
-    ref.ddq[i] = 6.0*c3*t + 12.0*c4*t*t + 20.0*c5*t*t*t;
-  }
-  return ref;
-}
-
-// ── Termino Slotine-Li rigido:  M(q)*ddq_r + C(q,dq)*dq_r + g(q) via RNEA ────
-//   (Infraestructura, no modificar.) Identidades (rnea(q,v,a) = M a + C v + g):
-//     g(q)         = rnea(q, 0, 0)
-//     M(q)*ddq_r   = rnea(q, 0, ddq_r) - g
-//     C(q,dq)*dq_r = 1/2 [ rnea(q, dq+dq_r, 0) - rnea(q, dq, 0) - rnea(q, dqr, 0) + g ]
-static Eigen::VectorXd slotineLiTorque(
-    const pinocchio::Model & model, pinocchio::Data & data,
-    const Eigen::VectorXd & q,   const Eigen::VectorXd & dq,
-    const Eigen::VectorXd & dqr, const Eigen::VectorXd & ddqr)
-{
-  const Eigen::VectorXd zero  = Eigen::VectorXd::Zero(model.nv);
-  const Eigen::VectorXd g     = pinocchio::rnea(model, data, q, zero,      zero);
-  const Eigen::VectorXd Mddqr = pinocchio::rnea(model, data, q, zero,      ddqr);
-  const Eigen::VectorXd r_sum = pinocchio::rnea(model, data, q, dq + dqr,  zero);
-  const Eigen::VectorXd r_dq  = pinocchio::rnea(model, data, q, dq,        zero);
-  const Eigen::VectorXd r_dqr = pinocchio::rnea(model, data, q, dqr,       zero);
-  const Eigen::VectorXd Cqr   = 0.5 * (r_sum - r_dq - r_dqr + g);
-  return Mddqr + Cqr;
-}
-
-// ── Regresor Slotine-Li: identidad de polarizacion sobre el regresor ────────
-//   (Infraestructura, no modificar.) R(q,v,a)*pi = M a + C v + g para
-//   cualquier vector de parametros dinamicos pi (10 por cuerpo).
-static Eigen::MatrixXd slotineLiRegressor(
-    const pinocchio::Model & model, pinocchio::Data & data,
-    const Eigen::VectorXd & q,   const Eigen::VectorXd & dq,
-    const Eigen::VectorXd & dqr, const Eigen::VectorXd & ddqr)
-{
-  const Eigen::VectorXd zero = Eigen::VectorXd::Zero(model.nv);
-  const Eigen::MatrixXd R_g     = pinocchio::computeJointTorqueRegressor(model, data, q, zero,     zero);
-  const Eigen::MatrixXd R_Mddqr = pinocchio::computeJointTorqueRegressor(model, data, q, zero,     ddqr);
-  const Eigen::MatrixXd R_sum   = pinocchio::computeJointTorqueRegressor(model, data, q, dq + dqr, zero);
-  const Eigen::MatrixXd R_dq    = pinocchio::computeJointTorqueRegressor(model, data, q, dq,       zero);
-  const Eigen::MatrixXd R_dqr   = pinocchio::computeJointTorqueRegressor(model, data, q, dqr,      zero);
-  return R_Mddqr + 0.5 * (R_sum - R_dq - R_dqr + R_g);
-}
-
 // ── Fases de arranque ─────────────────────────────────────────────────────────
 enum class Phase { HOMING, SETTLE, RUN };
 
@@ -351,17 +286,16 @@ public:
     const std::string urdf_path =
       std::string(PACKAGE_URDF_DIR) + "/open_manipulator_x.urdf";
     try {
-      pinocchio::urdf::buildModel(urdf_path, model_);
+      model_.load(urdf_path);
     } catch (const std::exception & e) {
       RCLCPP_FATAL(this->get_logger(), "Pinocchio buildModel: %s", e.what());
       throw;
     }
-    data_ = pinocchio::Data(model_);
 
     for (int i = 0; i < NARM; ++i) {
       const std::string jname = "joint" + std::to_string(i + 1);
-      jid_[i]    = model_.getJointId(jname);
-      pi_nom_[i] = model_.inertias[jid_[i]].toDynamicParameters();
+      jid_[i]    = model_.jointId(jname);
+      pi_nom_[i] = model_.bodyDynamicParameters(jid_[i]);
     }
 
     RCLCPP_INFO(this->get_logger(),
@@ -385,12 +319,6 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    joint_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
-      "/joint_states", 10,
-      [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
-        last_js_ = msg;
-      });
-
     timer_ = rclcpp::create_timer(
       this, this->get_clock(), rclcpp::Duration::from_seconds(DT),
       [this]() { tick(); });
@@ -408,58 +336,30 @@ private:
   // ── CSV (infraestructura, no modificar) ────────────────────────────────────
   void open_csv(int test_num)
   {
-    std::filesystem::create_directories(
-      std::string(PACKAGE_DATA_DIR) + "/lab7/sim/mrac12p");
-
     csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab7/sim/mrac12p/gz_mrac_joint_12p_"
                 + mode_str_ + "_" + std::to_string(test_num) + ".csv";
-    csv_.open(csv_path_);
-    if (!csv_.is_open()) {
-      RCLCPP_ERROR(this->get_logger(), "No se pudo crear: %s", csv_path_.c_str());
-      return;
-    }
-    csv_ << "t,"
-         << "q1,q2,q3,q4,"
-         << "dq1,dq2,dq3,dq4,"
-         << "q1_des,q2_des,q3_des,q4_des,"
-         << "dq1_des,dq2_des,dq3_des,dq4_des,"
-         << "s1,s2,s3,s4,"
-         << "tau1,tau2,tau3,tau4,"
-         << "sat1,sat2,sat3,sat4,"
-         << "a1_hat,a2_hat,a3_hat,"
-         << "dm_hat,dmcx_hat,dmcy_hat,dmcz_hat,"
-         << "fv1_hat,fc1_hat,fc2_hat,fc3_hat,fc4_hat\n";
-    RCLCPP_INFO(this->get_logger(), "CSV: %s", csv_path_.c_str());
-  }
-
-  // ── Lectura de estados articulares (infraestructura, no modificar) ─────────
-  void read_js(Vec4 & q, Vec4 & dq)
-  {
-    static const std::array<std::string, NARM> names = {
-      "joint1", "joint2", "joint3", "joint4"
-    };
-    q.setZero();
-    dq.setZero();
-    if (!last_js_) { return; }
-    const auto & js = *last_js_;
-    for (int j = 0; j < NARM; ++j) {
-      for (std::size_t i = 0; i < js.name.size(); ++i) {
-        if (js.name[i] == names[j]) {
-          if (i < js.position.size()) { q[j]  = js.position[i]; }
-          if (i < js.velocity.size()) { dq[j] = js.velocity[i]; }
-          break;
-        }
-      }
-    }
+    omx::openCsv(csv_, csv_path_,
+      "t,"
+      "q1,q2,q3,q4,"
+      "dq1,dq2,dq3,dq4,"
+      "q1_des,q2_des,q3_des,q4_des,"
+      "dq1_des,dq2_des,dq3_des,dq4_des,"
+      "s1,s2,s3,s4,"
+      "tau1,tau2,tau3,tau4,"
+      "sat1,sat2,sat3,sat4,"
+      "a1_hat,a2_hat,a3_hat,"
+      "dm_hat,dmcx_hat,dmcy_hat,dmcz_hat,"
+      "fv1_hat,fc1_hat,fc2_hat,fc3_hat,fc4_hat",
+      this->get_logger());
   }
 
   // ── Tick de control a 200 Hz (tiempo simulado) ────────────────────────────
   void tick()
   {
-    if (!last_js_) { return; }
+    if (!js_.ready()) { return; }
 
     Vec4 q, dq;
-    read_js(q, dq);
+    js_.read(q, dq);
 
     // ── Maquina de fases: HOMING -> SETTLE -> RUN (no modificar) ────────────
     if (!home_init_) {
@@ -475,7 +375,7 @@ private:
     Reference ref;
     if (phase_ == Phase::HOMING) {
       if (t_ < T_HOME) {
-        ref = homingTrajectory(t_, q_home0_, dq_home0_);
+        ref = omx::quinticTransition(t_, T_HOME, q_home0_, desiredTrajectory(0.0), dq_home0_);
       } else {
         phase_ = Phase::SETTLE;
         RCLCPP_INFO(this->get_logger(),
@@ -500,7 +400,7 @@ private:
     // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 4] Ley de control y adaptacion — COMPLETAR
     //  Disponible: q, dq (medidos), ref.q, ref.dq, ref.ddq, y las funciones
-    //  slotineLiTorque() / slotineLiRegressor() (infraestructura).
+    //  model_.slotineLiTorque() / model_.slotineLiRegressor() (infraestructura).
     // ─────────────────────────────────────────────────────────────────────────
 
     //  3.1 Errores, superficie y referencias auxiliares:
@@ -520,25 +420,12 @@ private:
     //      oscilacion): tanh_dqd_i = tanh(dq_d_i / EPS_FRICTION)
     const Vec4 tanh_dqd = Vec4::Zero();   // COMPLETAR
 
-    // ── Vectores de tamano nv para Pinocchio (no modificar) ─────────────────
-    Eigen::VectorXd q_pin    = Eigen::VectorXd::Zero(model_.nv);
-    Eigen::VectorXd dq_pin   = Eigen::VectorXd::Zero(model_.nv);
-    Eigen::VectorXd dqr_pin  = Eigen::VectorXd::Zero(model_.nv);
-    Eigen::VectorXd ddqr_pin = Eigen::VectorXd::Zero(model_.nv);
-    q_pin.head<NARM>()    = q;
-    dq_pin.head<NARM>()   = dq;
-    dqr_pin.head<NARM>()  = dqr;
-    ddqr_pin.head<NARM>() = ddqr;
-
     // ── Matriz de inercia nominal M(q) via CRBA (no modificar) ──────────────
-    pinocchio::crba(model_, data_, q_pin);
-    data_.M.triangularView<Eigen::StrictlyLower>() =
-      data_.M.triangularView<Eigen::StrictlyUpper>().transpose();
-    const Eigen::Matrix4d M = data_.M.topLeftCorner<NARM, NARM>();
+    const Eigen::Matrix4d M = model_.massMatrix(q);
 
     // ── Termino rigido nominal Slotine-Li (no modificar) ────────────────────
     const Vec4 tau_rigid =
-      slotineLiTorque(model_, data_, q_pin, dq_pin, dqr_pin, ddqr_pin).head<NARM>();
+      model_.slotineLiTorque(q, dq, dqr, ddqr);
 
     //  3.3 Feedforward de friccion nominal del prior:
     //      tau_fric_nom = fv_prior .* dq + fc_prior .* tanh_dqd
@@ -547,7 +434,7 @@ private:
     const Vec4 tau_nom = tau_rigid + tau_fric_nom;
 
     // ── Regresor 4x12 (infraestructura, no modificar): usa dqr/ddqr/tanh_dqd ─
-    const Eigen::MatrixXd Y_SL = slotineLiRegressor(model_, data_, q_pin, dq_pin, dqr_pin, ddqr_pin);
+    const Eigen::MatrixXd Y_SL = model_.slotineLiRegressor(q, dq, dqr, ddqr);
     MatY Y = MatY::Zero();
     for (int i = 0; i < 3; ++i) {                                        // Y_alpha1..3
       const int col0 = 10 * (static_cast<int>(jid_[i]) - 1);
@@ -638,10 +525,9 @@ private:
   }
 
   // ── Miembros ───────────────────────────────────────────────────────────────
-  pinocchio::Model model_;
-  pinocchio::Data  data_;
+  omx::RobotModel model_;
 
-  std::array<pinocchio::JointIndex, NARM> jid_;
+  std::array<int, NARM> jid_;
   std::array<Vec10, NARM> pi_nom_;
 
   double      t_;
@@ -659,9 +545,8 @@ private:
   Vec4        fv_prior_;
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
-  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  joint_sub_;
+  omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)
   rclcpp::TimerBase::SharedPtr timer_;
-  sensor_msgs::msg::JointState::SharedPtr last_js_;
 
   std::ofstream csv_;
   std::string   csv_path_;

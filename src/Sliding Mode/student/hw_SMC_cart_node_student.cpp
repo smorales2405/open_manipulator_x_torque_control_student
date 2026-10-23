@@ -167,14 +167,11 @@
 #include <Eigen/LU>
 #include <Eigen/SVD>
 
-#include <pinocchio/fwd.hpp>
-#include <pinocchio/algorithm/crba.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/algorithm/kinematics.hpp>
-#include <pinocchio/algorithm/frames.hpp>
-#include <pinocchio/parsers/urdf.hpp>
-
-#include "dynamixel_sdk/dynamixel_sdk.h"
+#include "omx/dynamixel_arm.hpp"
+#include "omx/motor_model.hpp"
+#include "omx/robot_model.hpp"
+#include "omx/ros_utils.hpp"
+#include "omx/trajectory.hpp"
 
 #ifndef PACKAGE_DATA_DIR
 #define PACKAGE_DATA_DIR "."
@@ -182,54 +179,18 @@
 #ifndef PACKAGE_URDF_DIR
 #define PACKAGE_URDF_DIR "."
 #endif
-#ifndef PACKAGE_CONFIG_DIR
-#define PACKAGE_CONFIG_DIR "."
-#endif
 
 using namespace std::chrono_literals;
 
 // ============================================================
-// Constantes Dynamixel / conversión de unidades
+// Constantes (servos Dynamixel y unidades: omx/dynamixel_io.hpp)
 // ============================================================
 
 static constexpr double PI = 3.14159265358979323846;
 static constexpr int    NUM_JOINTS = 4;
 
-static const std::array<uint8_t, NUM_JOINTS> DXL_ID = {11, 12, 13, 14};
-static constexpr int    BAUDRATE         = 1000000;
-static constexpr double PROTOCOL_VERSION = 2.0;
-
-static constexpr uint16_t ADDR_OPERATING_MODE   = 11;
-static constexpr uint16_t ADDR_CURRENT_LIMIT    = 38;
-static constexpr uint16_t ADDR_TORQUE_ENABLE    = 64;
-static constexpr uint16_t ADDR_GOAL_CURRENT     = 102;
-static constexpr uint16_t ADDR_PRESENT_CURRENT  = 126;
-static constexpr uint16_t ADDR_PRESENT_VELOCITY = 128;
-static constexpr uint16_t ADDR_PRESENT_POSITION = 132;
-
-static constexpr uint16_t LEN_GOAL_CURRENT     = 2;
-static constexpr uint16_t LEN_PRESENT_CURRENT  = 2;
-static constexpr uint16_t LEN_PRESENT_VELOCITY = 4;
-static constexpr uint16_t LEN_PRESENT_POSITION = 4;
-
-// Bloque contiguo current(126,2)+velocity(128,4)+position(132,4): una sola
-// GroupSyncRead por ciclo en vez de tres → latencia de bus ≈ 1/3.
-static constexpr uint16_t ADDR_STATE_BLOCK = ADDR_PRESENT_CURRENT;
-static constexpr uint16_t LEN_STATE_BLOCK  = 10;
-
-static constexpr uint8_t CURRENT_CONTROL_MODE = 0;
-static constexpr uint8_t TORQUE_ENABLE_VAL    = 1;
-static constexpr uint8_t TORQUE_DISABLE_VAL   = 0;
-
-static constexpr double POS_UNIT_RAD           = 2.0 * PI / 4096.0;
-static constexpr double VEL_UNIT_RAD_S         = 0.229 * 2.0 * PI / 60.0;
-static constexpr double CURRENT_UNIT_A         = 0.00269;
-static constexpr double TORQUE_CONSTANT_NM_A   = 1.654;
-static constexpr double TORQUE_PER_CURRENT_TICK = TORQUE_CONSTANT_NM_A * CURRENT_UNIT_A;
-
-// JOINT_ZERO_TICK, ENCODER_SIGN, CURRENT_SIGN, JOINT_LOWER/UPPER,
-// CURRENT_LIMIT_REGISTER, CURRENT_CMD_LIMIT, CURRENT_MEASURED_PEAK, TAU_MAX
-// → cargados desde config/motorXM430W350T_params.yaml como parámetros ROS 2.
+// Calibracion, limites y modelo del motor: omx::declareHwConfig
+// (config/motorXM430W350T_params.yaml como parametros ROS 2).
 
 // Amortiguamiento DLS para pseudo-inversa (evita divergencia en singularidades)
 static constexpr double LAMBDA_DLS    = 0.01;
@@ -327,50 +288,10 @@ static const Eigen::Vector4d K_sw     = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ============================================================
-// Utilidades de conversión (idénticas a hw_io_control_node)
-// ============================================================
-
-static int32_t toSigned32(uint32_t v)
-{
-  if (v > 0x7FFFFFFFu) return -static_cast<int32_t>(0xFFFFFFFFu - v + 1u);
-  return static_cast<int32_t>(v);
-}
-
-static int16_t toSigned16(uint32_t v)
-{
-  const uint16_t w = static_cast<uint16_t>(v & 0xFFFFu);
-  if (w > 0x7FFFu) return -static_cast<int16_t>(0xFFFFu - w + 1u);
-  return static_cast<int16_t>(w);
-}
-
-static int32_t wrappedTickDiff(int32_t raw, int32_t zero)
-{
-  int32_t d = raw - zero;
-  while (d >  2048) d -= 4096;
-  while (d < -2048) d += 4096;
-  return d;
-}
-
-static void currentToBytes(int16_t cur, uint8_t p[2])
-{
-  const uint16_t w = static_cast<uint16_t>(cur);
-  p[0] = DXL_LOBYTE(w);
-  p[1] = DXL_HIBYTE(w);
-}
-
-static int16_t clampCurrent(double x, int16_t lim)
-{
-  return static_cast<int16_t>(std::lround(
-    std::min(std::max(x, -static_cast<double>(lim)), static_cast<double>(lim))));
-}
-
-// ============================================================
 // Trayectoria cartesiana (identica a gz_SMC_cart_node)
 // ============================================================
 
-struct CartRef {
-  Eigen::Vector4d y, ydot, yddot;
-};
+using omx::CartRef;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  [SECCION 1] Trayectoria cartesiana de referencia — COMPLETAR
@@ -423,50 +344,6 @@ static CartRef desiredTrajectory(double t)
   return ref;
 }
 
-// Polinomio quintico general: interpola (y,ydot,yddot) desde el estado de
-// borde (y0,v0,a0) en t=0 hasta (yf,vf,af) en t=T. transitionTrajectory
-// (transicion inicial) y returnTrajectory (retorno final) son casos
-// particulares de este blend. INFRAESTRUCTURA: no modificar.
-static CartRef quinticBlend(double t, double T,
-                            const Eigen::Vector4d& y0, const Eigen::Vector4d& v0, const Eigen::Vector4d& a0,
-                            const Eigen::Vector4d& yf, const Eigen::Vector4d& vf, const Eigen::Vector4d& af)
-{
-  const double tc = std::min(t, T);
-  const double T2=T*T, T3=T2*T, T4=T3*T, T5=T4*T;
-  const Eigen::Vector4d c0 = y0;
-  const Eigen::Vector4d c1 = v0;
-  const Eigen::Vector4d c2 = 0.5 * a0;
-  const Eigen::Vector4d c3 = (20.0*(yf-y0) - (8.0*vf+12.0*v0)*T - (3.0*a0-af)*T2) / (2.0*T3);
-  const Eigen::Vector4d c4 = (30.0*(y0-yf) + (14.0*vf+16.0*v0)*T + (3.0*a0-2.0*af)*T2) / (2.0*T4);
-  const Eigen::Vector4d c5 = (12.0*(yf-y0) - (6.0*vf+6.0*v0)*T - (a0-af)*T2) / (2.0*T5);
-
-  const double t2=tc*tc, t3=t2*tc, t4=t3*tc, t5=t4*tc;
-  CartRef r;
-  r.y     = c0 + c1*tc + c2*t2 + c3*t3 + c4*t4 + c5*t5;
-  r.ydot  = c1 + 2.0*c2*tc + 3.0*c3*t2 + 4.0*c4*t3 + 5.0*c5*t4;
-  r.yddot = 2.0*c2 + 6.0*c3*tc + 12.0*c4*t2 + 20.0*c5*t3;
-  return r;
-}
-
-// Transicion inicial: parte en reposo (v0=a0=0) en y0 y llega a la
-// trayectoria periodica (y,ydot,yddot)(0) — empalme C2 (ydot_d(0) != 0).
-// INFRAESTRUCTURA: no modificar.
-static CartRef transitionTrajectory(double t, const Eigen::Vector4d& y0, const CartRef& goal, double T)
-{
-  return quinticBlend(t, T, y0, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero(),
-                      goal.y, goal.ydot, goal.yddot);
-}
-
-// Retorno final: parte del estado de la trayectoria periodica en el
-// instante en que termina t_run (start = desiredTrajectory(t_run)) y llega
-// en reposo (vf=af=0) a yf (y_inicial) — evita el frenazo/caida por corte
-// de torque. INFRAESTRUCTURA: no modificar.
-static CartRef returnTrajectory(double t, double T, const CartRef& start, const Eigen::Vector4d& yf)
-{
-  return quinticBlend(t, T, start.y, start.ydot, start.yddot,
-                      yf, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero());
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  [SECCION 3] Funciones de conmutacion — COMPLETAR
 //
@@ -508,8 +385,7 @@ class HWSMCCartNode : public rclcpp::Node
 {
 public:
   explicit HWSMCCartNode(const rclcpp::NodeOptions& opts = rclcpp::NodeOptions())
-  : Node("hw_smc_cart_node", opts),
-    hw_active_(false), y0_initialized_(false)
+  : Node("hw_smc_cart_node", opts), y0_initialized_(false)
   {
     // ── Parámetros ──────────────────────────────────────────────────────────
     this->declare_parameter<std::string>("port_name",  "/dev/ttyUSB0");
@@ -520,27 +396,12 @@ public:
     this->declare_parameter<std::string>("rho_func",    "sat");
     this->declare_parameter<double>     ("phi",         0.3);
 
-    using dvec = std::vector<double>;
-    this->declare_parameter<dvec>("motor_alpha",            dvec{208.5, 208.5, 208.5, 208.5});
-    this->declare_parameter<dvec>("motor_Fv",               dvec{0.0,   0.0,   0.0,   0.0  });
-    this->declare_parameter<dvec>("motor_Fc",               dvec{0.0,   0.0,   0.0,   0.0  });
-    this->declare_parameter<dvec>("motor_I_offset",         dvec{0.0,   0.0,   0.0,   0.0  });
-    this->declare_parameter<double>("motor_epsilon_friction", 0.05);
-    this->declare_parameter<double>("friction_fc_scale",      0.95);
     this->declare_parameter<double>("ab_alpha", 0.2);
     this->declare_parameter<double>("ab_beta",  0.02);
     this->declare_parameter<double>("loop_rate_hz", 200.0);
 
-    using ivec = std::vector<int64_t>;
-    this->declare_parameter<ivec>  ("joint_zero_tick",        ivec{2048, 2048, 2048, 2048});
-    this->declare_parameter<dvec>  ("encoder_sign",           dvec{+1.0, +1.0, +1.0, +1.0});
-    this->declare_parameter<dvec>  ("current_sign",           dvec{+1.0, +1.0, +1.0, +1.0});
-    this->declare_parameter<dvec>  ("joint_lower",            dvec{-2.356194, -1.919862, -1.919862, -1.8});
-    this->declare_parameter<dvec>  ("joint_upper",            dvec{+2.356194, +1.745329, +1.570796, +2.1});
-    this->declare_parameter<int>   ("current_limit_register", 350);
-    this->declare_parameter<ivec>  ("current_cmd_limit",      ivec{257, 257, 257, 257});
-    this->declare_parameter<int>   ("current_measured_peak",  313);
-    this->declare_parameter<double>("tau_max",                1.2);
+    // Modelo del motor, calibracion y limites (config/motorXM430W350T_params.yaml)
+    hw_ = omx::declareHwConfig(*this);
 
     port_name_    = this->get_parameter("port_name").as_string();
     use_integral_ = this->get_parameter("use_integral").as_bool();
@@ -562,44 +423,17 @@ public:
       }
     }
 
-    auto load_vec4 = [this](const std::string& name) {
-      auto v = get_parameter(name).as_double_array();
-      return Vec4(v[0], v[1], v[2], v[3]);
-    };
-    motor_alpha_    = load_vec4("motor_alpha");
-    motor_Fv_       = load_vec4("motor_Fv");
-    motor_Fc_       = load_vec4("motor_Fc");
-    motor_I_offset_ = load_vec4("motor_I_offset");
-    motor_epsilon_  = get_parameter("motor_epsilon_friction").as_double();
-    fc_scale_       = get_parameter("friction_fc_scale").as_double();
-
     ab_alpha_ = get_parameter("ab_alpha").as_double();
     ab_beta_  = get_parameter("ab_beta").as_double();
     loop_rate_hz_ = std::min(std::max(get_parameter("loop_rate_hz").as_double(), 50.0), 400.0);
     Ts_ = 1.0 / loop_rate_hz_;
-
-    {
-      const auto zt = get_parameter("joint_zero_tick").as_integer_array();
-      for (int i = 0; i < NUM_JOINTS; ++i) joint_zero_tick_[i] = static_cast<int32_t>(zt[i]);
-    }
-    encoder_sign_ = load_vec4("encoder_sign");
-    current_sign_ = load_vec4("current_sign");
-    joint_lower_  = load_vec4("joint_lower");
-    joint_upper_  = load_vec4("joint_upper");
-    current_limit_register_ = static_cast<uint16_t>(get_parameter("current_limit_register").as_int());
-    {
-      const auto cl = get_parameter("current_cmd_limit").as_integer_array();
-      for (int i = 0; i < NUM_JOINTS; ++i) current_cmd_limit_[i] = static_cast<int16_t>(cl[i]);
-    }
-    current_measured_peak_ = static_cast<int16_t>(get_parameter("current_measured_peak").as_int());
-    tau_max_ = get_parameter("tau_max").as_double();
 
     RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  t_run(seguimiento)=%.1fs  test=%d",
       port_name_.c_str(), gain_scale_, t_run_, test_num);
     RCLCPP_INFO(get_logger(),
       "%s cartesiano hw — rho=%s  phi=%.4f  tau_max=%.2f N·m  T_trans=%.1f s",
       use_integral_ ? "ISMC" : "SMC",
-      rho_str_.c_str(), phi_, tau_max_, T_TRANS);
+      rho_str_.c_str(), phi_, hw_.limits.tau_max, T_TRANS);
     if (use_integral_) {
       RCLCPP_INFO(get_logger(),
         "Lambda_I=[%.1f %.1f %.1f %.1f]  K_P=[%.0f %.0f %.0f %.0f]  "
@@ -626,61 +460,48 @@ public:
       Y_START[0], Y_START[1], Y_START[2], Y_START[3], Z_MIN_FLOOR);
     RCLCPP_INFO(get_logger(),
       "motor α=[%.1f %.1f %.1f %.1f]  Fv=[%.2f %.2f %.2f %.2f]  ε=%.3f",
-      motor_alpha_(0), motor_alpha_(1), motor_alpha_(2), motor_alpha_(3),
-      motor_Fv_(0), motor_Fv_(1), motor_Fv_(2), motor_Fv_(3), motor_epsilon_);
+      hw_.motor.alpha(0), hw_.motor.alpha(1), hw_.motor.alpha(2), hw_.motor.alpha(3),
+      hw_.motor.Fv(0), hw_.motor.Fv(1), hw_.motor.Fv(2), hw_.motor.Fv(3), hw_.motor.epsilon);
     RCLCPP_INFO(get_logger(),
       "Filtro α-β: α=%.3f  β=%.4f  |  Fc_scale=%.2f  |  lazo=%.0f Hz",
-      ab_alpha_, ab_beta_, fc_scale_, loop_rate_hz_);
+      ab_alpha_, ab_beta_, hw_.motor.fc_scale, loop_rate_hz_);
 
     // ── Pinocchio ────────────────────────────────────────────────────────────
     const std::string urdf = std::string(PACKAGE_URDF_DIR) + "/open_manipulator_x.urdf";
     try {
-      pinocchio::urdf::buildModel(urdf, model_);
+      model_.load(urdf, EFF_FRAME_NAME);   // lanza si falta el URDF o el frame del efector
     } catch (const std::exception& e) {
       RCLCPP_FATAL(get_logger(), "Pinocchio URDF: %s", e.what());
       throw;
     }
-    data_ = pinocchio::Data(model_);
-
-    if (!model_.existFrame(EFF_FRAME_NAME)) {
-      RCLCPP_FATAL(get_logger(), "Frame '%s' no encontrado en URDF", EFF_FRAME_NAME);
-      throw std::runtime_error("Frame not found");
-    }
-    frame_id_ = model_.getFrameId(EFF_FRAME_NAME);
-    RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d  frame='%s' (id=%lu)",
-      model_.nv, EFF_FRAME_NAME, frame_id_);
+    RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d  frame='%s'", model_.nv(), EFF_FRAME_NAME);
 
     // ── CSV (prefijo segun la ley activa; compatible con plots_SMC_cart.m
     //    controller='smc'|'smci') ────────────────────────────────────────────
-    std::filesystem::create_directories(std::string(PACKAGE_DATA_DIR) + "/lab6/real/act2");
     csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab6/real/act2/"
                 + (use_integral_ ? "hw_smci_cart_" : "hw_smc_cart_")
                 + rho_str_ + "_" + std::to_string(test_num) + ".csv";
-    csv_.open(csv_path_);
-    if (csv_.is_open()) {
-      csv_ << "t,q1,q2,q3,q4,"
-              "x,y,z,phi,"
-              "x_des,y_des,z_des,phi_des,"
-              "xdot,ydot,zdot,phidot,"
-              "xdot_des,ydot_des,zdot_des,phidot_des,"
-              "s1,s2,s3,s4,"
-              "tau1,tau2,tau3,tau4,"
-              "cond_J,"
-              "dq1,dq2,dq3,dq4,"
-              "dq1_filt,dq2_filt,dq3_filt,dq4_filt,"
-              "curr_cmd1,curr_cmd2,curr_cmd3,curr_cmd4,"
-              "curr_meas1,curr_meas2,curr_meas3,curr_meas4,"
-              "xi1,xi2,xi3,xi4\n";
-      RCLCPP_INFO(get_logger(), "CSV: %s", csv_path_.c_str());
-    } else {
-      RCLCPP_WARN(get_logger(), "No se pudo crear CSV: %s", csv_path_.c_str());
-    }
+    omx::openCsv(csv_, csv_path_,
+      "t,q1,q2,q3,q4,"
+      "x,y,z,phi,"
+      "x_des,y_des,z_des,phi_des,"
+      "xdot,ydot,zdot,phidot,"
+      "xdot_des,ydot_des,zdot_des,phidot_des,"
+      "s1,s2,s3,s4,"
+      "tau1,tau2,tau3,tau4,"
+      "cond_J,"
+      "dq1,dq2,dq3,dq4,"
+      "dq1_filt,dq2_filt,dq3_filt,dq4_filt,"
+      "curr_cmd1,curr_cmd2,curr_cmd3,curr_cmd4,"
+      "curr_meas1,curr_meas2,curr_meas3,curr_meas4,"
+      "xi1,xi2,xi3,xi4",
+      get_logger());
 
     // ── Publisher de monitoreo ────────────────────────────────────────────────
     js_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/hw/joint_states", 10);
 
     // ── SDK ──────────────────────────────────────────────────────────────────
-    if (!init_hardware()) {
+    if (!arm_.open(port_name_, hw_.calib, hw_.limits.current_limit_register)) {
       RCLCPP_FATAL(get_logger(), "Fallo hardware init. Abortando.");
       throw std::runtime_error("Hardware init failed");
     }
@@ -697,166 +518,18 @@ public:
   ~HWSMCCartNode()
   {
     if (timer_) timer_->cancel();
-    shutdown_hardware();
+    arm_.close();
     if (csv_.is_open()) { csv_.flush(); csv_.close(); }
     RCLCPP_INFO(get_logger(), "Nodo finalizado.");
   }
 
 private:
   // ─────────────────────────────────────────────────────────────────────────
-  //  Hardware
-  // ─────────────────────────────────────────────────────────────────────────
-
-  bool init_hardware()
-  {
-    port_handler_   = dynamixel::PortHandler::getPortHandler(port_name_.c_str());
-    packet_handler_ = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
-
-    if (!port_handler_->openPort()) {
-      RCLCPP_ERROR(get_logger(), "No se pudo abrir %s", port_name_.c_str());
-      return false;
-    }
-    if (!port_handler_->setBaudRate(BAUDRATE)) {
-      RCLCPP_ERROR(get_logger(), "No se pudo configurar baudrate");
-      port_handler_->closePort();
-      return false;
-    }
-
-    for (const auto id : DXL_ID)
-      dxl_write1(id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE_VAL, "pre-disable");
-
-    for (const auto id : DXL_ID) {
-      if (!dxl_write1(id, ADDR_OPERATING_MODE, CURRENT_CONTROL_MODE, "set mode") ||
-          !dxl_write2(id, ADDR_CURRENT_LIMIT, current_limit_register_, "set limit") ||
-          !dxl_write1(id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE_VAL, "enable torque")) {
-        port_handler_->closePort();
-        return false;
-      }
-      RCLCPP_INFO(get_logger(), "DXL ID %d listo", static_cast<int>(id));
-    }
-
-    grp_read_ = std::make_unique<dynamixel::GroupSyncRead>(
-      port_handler_, packet_handler_, ADDR_STATE_BLOCK, LEN_STATE_BLOCK);
-    grp_wcur_ = std::make_unique<dynamixel::GroupSyncWrite>(
-      port_handler_, packet_handler_, ADDR_GOAL_CURRENT, LEN_GOAL_CURRENT);
-
-    for (const auto id : DXL_ID)
-      grp_read_->addParam(id);
-
-    hw_active_ = true;
-    RCLCPP_INFO(get_logger(), "Hardware inicializado en %s", port_name_.c_str());
-    return true;
-  }
-
-  void shutdown_hardware()
-  {
-    if (!hw_active_) return;
-    hw_active_ = false;
-
-    if (grp_wcur_) {
-      const std::array<int16_t, NUM_JOINTS> zero = {0, 0, 0, 0};
-      send_currents(zero);
-      rclcpp::sleep_for(std::chrono::milliseconds(20));
-    }
-    for (const auto id : DXL_ID)
-      dxl_write1(id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE_VAL, "shutdown disable");
-
-    if (port_handler_) {
-      port_handler_->closePort();
-      RCLCPP_INFO(get_logger(), "Puerto cerrado.");
-    }
-  }
-
-  bool dxl_write1(uint8_t id, uint16_t addr, uint8_t val, const char* lbl)
-  {
-    uint8_t err = 0;
-    const int r = packet_handler_->write1ByteTxRx(port_handler_, id, addr, val, &err);
-    if (r != COMM_SUCCESS || err != 0) {
-      RCLCPP_WARN(get_logger(), "[ID %d] %s: r=%d err=%d", id, lbl, r, err);
-      return false;
-    }
-    return true;
-  }
-
-  bool dxl_write2(uint8_t id, uint16_t addr, uint16_t val, const char* lbl)
-  {
-    uint8_t err = 0;
-    const int r = packet_handler_->write2ByteTxRx(port_handler_, id, addr, val, &err);
-    if (r != COMM_SUCCESS || err != 0) {
-      RCLCPP_WARN(get_logger(), "[ID %d] %s: r=%d err=%d", id, lbl, r, err);
-      return false;
-    }
-    return true;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  //  Lectura / escritura SDK
-  // ─────────────────────────────────────────────────────────────────────────
-
-  bool read_state(Vec4& q, Vec4& dq, std::array<int16_t, NUM_JOINTS>& cur)
-  {
-    if (grp_read_->txRxPacket() != COMM_SUCCESS) {
-      RCLCPP_ERROR(get_logger(), "SyncRead fallo");
-      return false;
-    }
-    for (int i = 0; i < NUM_JOINTS; ++i) {
-      const uint8_t id = DXL_ID[i];
-      if (!grp_read_->isAvailable(id, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION) ||
-          !grp_read_->isAvailable(id, ADDR_PRESENT_VELOCITY, LEN_PRESENT_VELOCITY) ||
-          !grp_read_->isAvailable(id, ADDR_PRESENT_CURRENT,  LEN_PRESENT_CURRENT)) {
-        RCLCPP_ERROR(get_logger(), "[ID %d] dato no disponible", id);
-        return false;
-      }
-      const int32_t rp = toSigned32(static_cast<uint32_t>(
-        grp_read_->getData(id, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION)));
-      const int32_t rv = toSigned32(static_cast<uint32_t>(
-        grp_read_->getData(id, ADDR_PRESENT_VELOCITY, LEN_PRESENT_VELOCITY)));
-      const int16_t rc = toSigned16(static_cast<uint32_t>(
-        grp_read_->getData(id, ADDR_PRESENT_CURRENT,  LEN_PRESENT_CURRENT)));
-
-      q(i)   = encoder_sign_(i) * static_cast<double>(wrappedTickDiff(rp, joint_zero_tick_[i])) * POS_UNIT_RAD;
-      dq(i)  = encoder_sign_(i) * static_cast<double>(rv) * VEL_UNIT_RAD_S;
-      cur[i] = rc;
-    }
-    return true;
-  }
-
-  bool send_currents(const std::array<int16_t, NUM_JOINTS>& cmd)
-  {
-    uint8_t p[NUM_JOINTS][2];
-    for (int i = 0; i < NUM_JOINTS; ++i) {
-      currentToBytes(cmd[i], p[i]);
-      grp_wcur_->addParam(DXL_ID[i], p[i]);
-    }
-    const int r = grp_wcur_->txPacket();
-    grp_wcur_->clearParam();
-    if (r != COMM_SUCCESS) {
-      RCLCPP_ERROR(get_logger(), "SyncWrite fallo");
-      return false;
-    }
-    return true;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
   //  Conversión torque → corriente
   //  Fv usa la velocidad medida (término suave); Fc usa la velocidad articular
   //  DESEADA (mapeo DLS de ydot_des): señal sin ruido → sin chattering, y
   //  aporta el empuje de despegue cuando la referencia arranca.
   // ─────────────────────────────────────────────────────────────────────────
-
-  std::array<int16_t, NUM_JOINTS> torque_to_current(const Vec4& tau, const Vec4& dq,
-                                                    const Vec4& dq_des)
-  {
-    std::array<int16_t, NUM_JOINTS> cmd{};
-    for (int i = 0; i < NUM_JOINTS; ++i) {
-      const double I_model = motor_alpha_(i) * tau(i)
-                           + motor_Fv_(i)    * dq(i)
-                           + fc_scale_ * motor_Fc_(i) * std::tanh(dq_des(i) / motor_epsilon_)
-                           + motor_I_offset_(i);
-      cmd[i] = clampCurrent(current_sign_(i) * encoder_sign_(i) * I_model, current_cmd_limit_[i]);
-    }
-    return cmd;
-  }
 
   // ─────────────────────────────────────────────────────────────────────────
   //  Ley de control cartesiana (SMC clasico o ISMC segun use_integral)
@@ -875,45 +548,26 @@ private:
   SMCOut compute_control(const Vec4& q, const Vec4& dq, const CartRef& ref,
                          bool in_tracking)
   {
-    Eigen::VectorXd q_pin  = Eigen::VectorXd::Zero(model_.nv);
-    Eigen::VectorXd dq_pin = Eigen::VectorXd::Zero(model_.nv);
-    q_pin.head(NUM_JOINTS)  = q;
-    dq_pin.head(NUM_JOINTS) = dq;
+    // FK, jacobiano lineal y bias J̇·q̇ del efector (LOCAL_WORLD_ALIGNED) (infraestructura, no modificar)
+    const auto ee = model_.eeKinematics(q, dq);
 
-    // FK + Jacobiano 6×nv (infraestructura, no modificar)
-    Eigen::MatrixXd J6 = Eigen::MatrixXd::Zero(6, model_.nv);
-    pinocchio::computeFrameJacobian(model_, data_, q_pin, frame_id_,
-                                     pinocchio::LOCAL_WORLD_ALIGNED, J6);
-
-    const Eigen::Vector3d p   = data_.oMf[frame_id_].translation();
+    const Eigen::Vector3d p   = ee.p;
     const double phi_ee       = q[1] + q[2] + q[3];
 
     // Jacobiano de tarea 4×4
     Eigen::Matrix4d J4;
-    J4.row(0) = J6.row(0).head<NUM_JOINTS>();
-    J4.row(1) = J6.row(1).head<NUM_JOINTS>();
-    J4.row(2) = J6.row(2).head<NUM_JOINTS>();
+    J4.topRows<3>() = ee.J;
     J4.row(3) << 0.0, 1.0, 1.0, 1.0;
 
     const Eigen::Vector4d ydot = J4 * dq;
 
     // Término de bias  Jdot*qdot  (FK con qddot=0)
-    pinocchio::forwardKinematics(model_, data_, q_pin, dq_pin,
-                                  Eigen::VectorXd::Zero(model_.nv));
-    const pinocchio::Motion bias =
-      pinocchio::getFrameClassicalAcceleration(model_, data_, frame_id_,
-                                                pinocchio::LOCAL_WORLD_ALIGNED);
     Eigen::Vector4d jdqd;
-    jdqd << bias.linear()[0], bias.linear()[1], bias.linear()[2], 0.0;
+    jdqd << ee.dJdq, 0.0;
 
     // Dinámica M(q) y Phi(q,qdot)
-    pinocchio::crba(model_, data_, q_pin);
-    data_.M.triangularView<Eigen::StrictlyLower>() =
-      data_.M.triangularView<Eigen::StrictlyUpper>().transpose();
-    pinocchio::nonLinearEffects(model_, data_, q_pin, dq_pin);
-
-    const Eigen::Matrix4d M4   = data_.M.topLeftCorner<NUM_JOINTS, NUM_JOINTS>();
-    const Eigen::Vector4d nle4 = data_.nle.head<NUM_JOINTS>();
+    const Eigen::Matrix4d M4   = model_.massMatrix(q);
+    const Eigen::Vector4d nle4 = model_.nonlinearEffects(q, dq);
 
     // Errores cartesianos (infraestructura)
     const Eigen::Vector4d y_actual{p[0], p[1], p[2], phi_ee};
@@ -1002,8 +656,8 @@ private:
     // ═══════════════════════════════════════════════════════════════════════
 
     // Saturacion + flag de anti-windup (infraestructura, no modificar)
-    const Eigen::Vector4d tau_sat = tau_unsat.cwiseMin(tau_max_).cwiseMax(-tau_max_);
-    tau_saturated_prev_ = (tau_unsat.cwiseAbs().maxCoeff() >= tau_max_);
+    const Eigen::Vector4d tau_sat = tau_unsat.cwiseMin(hw_.limits.tau_max).cwiseMax(-hw_.limits.tau_max);
+    tau_saturated_prev_ = (tau_unsat.cwiseAbs().maxCoeff() >= hw_.limits.tau_max);
 
     // Condicionamiento del Jacobiano (monitoreo de singularidades)
     Eigen::JacobiSVD<Eigen::Matrix4d> svd(J4);
@@ -1027,7 +681,7 @@ private:
   {
     RCLCPP_ERROR(get_logger(), "PARADA: %s", reason.c_str());
     timer_->cancel();
-    shutdown_hardware();
+    arm_.close();
     if (csv_.is_open()) { csv_.flush(); csv_.close(); }
     rclcpp::shutdown();
   }
@@ -1038,7 +692,7 @@ private:
 
   void tick()
   {
-    if (!hw_active_) return;
+    if (!arm_.isOpen()) return;
 
     const auto tick_t0 = std::chrono::steady_clock::now();
     const auto tp  = std::chrono::high_resolution_clock::now();
@@ -1048,7 +702,7 @@ private:
     if (t_run_ > 0.0 && t >= t_shutdown) {
       RCLCPP_INFO(get_logger(), "Retorno a y_inicial completado. Deteniendo (t=%.1f s).", t);
       timer_->cancel();
-      shutdown_hardware();
+      arm_.close();
       if (csv_.is_open()) { csv_.flush(); csv_.close(); }
       rclcpp::shutdown();
       return;
@@ -1057,7 +711,7 @@ private:
     // 1. Lectura de estado
     Vec4 q, dq;
     std::array<int16_t, NUM_JOINTS> cur_meas{};
-    if (!read_state(q, dq, cur_meas)) {
+    if (!arm_.read(q, dq, cur_meas)) {
       emergency_stop("SyncRead fallido");
       return;
     }
@@ -1078,14 +732,9 @@ private:
       dq_hat_ = dq_pred + (ab_beta_ / Ts_) * r;
     }
 
-    Eigen::VectorXd q_pin  = Eigen::VectorXd::Zero(model_.nv);
-    q_pin.head(NUM_JOINTS)  = q;
-
     // 3. Capturar pose cartesiana inicial (primer tick)
     if (!y0_initialized_) {
-      pinocchio::forwardKinematics(model_, data_, q_pin);
-      pinocchio::updateFramePlacement(model_, data_, frame_id_);
-      const Eigen::Vector3d p0 = data_.oMf[frame_id_].translation();
+      const Eigen::Vector3d p0 = model_.eePosition(q);
       const double phi0        = q[1] + q[2] + q[3];
       y0_ = Eigen::Vector4d{p0[0], p0[1], p0[2], phi0};
       y0_initialized_ = true;
@@ -1097,7 +746,7 @@ private:
 
     // 4. Verificar límites articulares del estado real
     for (int i = 0; i < NUM_JOINTS; ++i) {
-      if (q(i) < joint_lower_(i) || q(i) > joint_upper_(i)) {
+      if (q(i) < hw_.limits.joint_lower(i) || q(i) > hw_.limits.joint_upper(i)) {
         emergency_stop("Articulacion " + std::to_string(i+1) + " fuera de limites: "
                        + std::to_string(q(i)) + " rad");
         return;
@@ -1113,7 +762,7 @@ private:
     const bool in_tracking = !in_trans && (t_run_ <= 0.0 || t < T_TRANS + t_run_);
     CartRef ref;
     if (in_trans) {
-      ref = transitionTrajectory(t, y0_, goal0, T_TRANS);
+      ref = omx::quinticTransition(t, T_TRANS, y0_, goal0);
     } else if (in_tracking) {
       ref = desiredTrajectory(t - T_TRANS);
     } else if (t < T_TRANS + t_run_ + RETURN_TIME_S) {
@@ -1122,8 +771,7 @@ private:
           t, RETURN_TIME_S);
         return_logged_ = true;
       }
-      ref = returnTrajectory(t - (T_TRANS + t_run_), RETURN_TIME_S,
-                            desiredTrajectory(t_run_), y0_);
+      ref = omx::quinticReturn(t - (T_TRANS + t_run_), RETURN_TIME_S, desiredTrajectory(t_run_), y0_);
     } else {
       ref.y = y0_;
       ref.ydot.setZero();
@@ -1166,17 +814,17 @@ private:
     }
 
     // 7. Conversión torque → corriente (Fc con la velocidad articular deseada)
-    const auto cur_cmd = torque_to_current(ctrl.tau, dq_hat_, ctrl.dq_des);
+    const auto cur_cmd = omx::torqueToCurrent(hw_, ctrl.tau, dq_hat_, ctrl.dq_des);
 
     // 8. Escribir corriente
-    if (!send_currents(cur_cmd)) {
+    if (!arm_.writeCurrents(cur_cmd)) {
       emergency_stop("SyncWrite fallido");
       return;
     }
 
     // 9. Verificar corriente medida
     for (int i = 0; i < NUM_JOINTS; ++i) {
-      if (std::abs(cur_meas[i]) > current_measured_peak_) {
+      if (std::abs(cur_meas[i]) > hw_.limits.current_measured_peak) {
         emergency_stop("Corriente insegura J" + std::to_string(i+1)
                        + ": " + std::to_string(cur_meas[i]) + " ticks");
         return;
@@ -1191,10 +839,10 @@ private:
       js.position     = {q(0), q(1), q(2), q(3)};
       js.velocity     = {dq(0), dq(1), dq(2), dq(3)};
       js.effort = {
-        static_cast<double>(cur_meas[0]) * TORQUE_PER_CURRENT_TICK,
-        static_cast<double>(cur_meas[1]) * TORQUE_PER_CURRENT_TICK,
-        static_cast<double>(cur_meas[2]) * TORQUE_PER_CURRENT_TICK,
-        static_cast<double>(cur_meas[3]) * TORQUE_PER_CURRENT_TICK
+        static_cast<double>(cur_meas[0]) * omx::TORQUE_PER_CURRENT_TICK,
+        static_cast<double>(cur_meas[1]) * omx::TORQUE_PER_CURRENT_TICK,
+        static_cast<double>(cur_meas[2]) * omx::TORQUE_PER_CURRENT_TICK,
+        static_cast<double>(cur_meas[3]) * omx::TORQUE_PER_CURRENT_TICK
       };
       js_pub_->publish(js);
     }
@@ -1259,9 +907,7 @@ private:
   //  Miembros
   // ─────────────────────────────────────────────────────────────────────────
 
-  pinocchio::Model      model_;
-  pinocchio::Data       data_;
-  pinocchio::FrameIndex frame_id_;
+  omx::RobotModel model_;
 
   std::string port_name_;
   double gain_scale_, t_run_;
@@ -1269,17 +915,7 @@ private:
   std::string rho_str_;
   double      phi_;
 
-  Vec4   motor_alpha_, motor_Fv_, motor_Fc_, motor_I_offset_;
-  double motor_epsilon_;
-  double fc_scale_;
-
-  std::array<int32_t, NUM_JOINTS> joint_zero_tick_;
-  Vec4     encoder_sign_, current_sign_;
-  Vec4     joint_lower_, joint_upper_;
-  uint16_t current_limit_register_;
-  std::array<int16_t, NUM_JOINTS> current_cmd_limit_;
-  int16_t  current_measured_peak_;
-  double   tau_max_;
+  omx::HwConfig hw_;   // modelo del motor, calibracion y limites (YAML del motor)
 
   double ab_alpha_, ab_beta_;
   double loop_rate_hz_{200.0};
@@ -1287,12 +923,8 @@ private:
   Vec4   q_hat_, dq_hat_;
   bool   ab_initialized_{false};
 
-  dynamixel::PortHandler*   port_handler_{nullptr};
-  dynamixel::PacketHandler* packet_handler_{nullptr};
-  std::unique_ptr<dynamixel::GroupSyncRead>  grp_read_;
-  std::unique_ptr<dynamixel::GroupSyncWrite> grp_wcur_;
+  omx::DynamixelArm arm_{this->get_logger()};
 
-  bool hw_active_;
   bool y0_initialized_;
   Eigen::Vector4d y0_;
   bool return_logged_{false};
@@ -1320,29 +952,7 @@ int main(int argc, char* argv[])
 {
   rclcpp::init(argc, argv);
 
-  rclcpp::NodeOptions opts;
-  const std::string cfg = std::string(PACKAGE_CONFIG_DIR) + "/motorXM430W350T_params.yaml";
-  if (std::filesystem::exists(cfg)) {
-    std::vector<std::string> args = {"--ros-args"};
-    bool in_ros_args = false;
-    for (int i = 1; i < argc; ++i) {
-      const std::string a(argv[i]);
-      if (a == "--ros-args") { in_ros_args = true; continue; }
-      if (in_ros_args) args.push_back(a);
-    }
-    // params-file AL FINAL → el YAML del motor tiene prioridad sobre los -p del CLI:
-    // los parámetros del motor NO se pueden sobreescribir; los params propios del
-    // nodo (no presentes en el YAML) sí se ajustan con -p.
-    args.push_back("--params-file");
-    args.push_back(cfg);
-    opts.arguments(args);
-    opts.use_global_arguments(false);
-    RCLCPP_INFO(rclcpp::get_logger("hw_smc_cart_node"),
-      "motorXM430W350T_params auto-cargado: %s", cfg.c_str());
-  } else {
-    RCLCPP_WARN(rclcpp::get_logger("hw_smc_cart_node"),
-      "motorXM430W350T_params no encontrado: %s — usando defaults del código.", cfg.c_str());
-  }
+  const rclcpp::NodeOptions opts = omx::motorParamsNodeOptions(argc, argv, "hw_smc_cart_node");
 
   try {
     rclcpp::spin(std::make_shared<HWSMCCartNode>(opts));

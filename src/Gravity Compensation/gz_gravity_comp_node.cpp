@@ -41,11 +41,8 @@
 #include "std_msgs/msg/float64_multi_array.hpp"
 
 #include <Eigen/Core>
-
-#include <pinocchio/fwd.hpp>
-#include <pinocchio/multibody.hpp>
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
+#include "omx/robot_model.hpp"
+#include "omx/ros_utils.hpp"
 
 using namespace std::chrono_literals;
 
@@ -91,40 +88,28 @@ public:
     // ── Pinocchio ─────────────────────────────────────────────────────────────
     const std::string urdf = std::string(PACKAGE_URDF_DIR) + "/open_manipulator_x.urdf";
     try {
-      pinocchio::urdf::buildModel(urdf, model_);
+      model_.load(urdf);
     } catch (const std::exception & e) {
       RCLCPP_FATAL(get_logger(), "Pinocchio URDF: %s", e.what());
       throw;
     }
-    data_ = pinocchio::Data(model_);
-    RCLCPP_INFO(get_logger(), "Modelo Pinocchio cargado: nv=%d", model_.nv);
+    RCLCPP_INFO(get_logger(), "Modelo Pinocchio cargado: nv=%d", model_.nv());
 
     // ── CSV ───────────────────────────────────────────────────────────────────
     const std::string csv_dir = std::string(PACKAGE_DATA_DIR) + "/gravity_comp";
-    std::filesystem::create_directories(csv_dir);
     csv_path_ = csv_dir + "/gz_gc_data_" + std::to_string(test_num) + ".csv";
-    csv_.open(csv_path_);
-    if (csv_.is_open()) {
-      csv_ << "t,"
-              "q1,q2,q3,q4,"
-              "dq1,dq2,dq3,dq4,"
-              "tau_g1,tau_g2,tau_g3,tau_g4,"
-              "tau_pd1,tau_pd2,tau_pd3,tau_pd4,"
-              "tau1,tau2,tau3,tau4\n";
-      RCLCPP_INFO(get_logger(), "CSV: %s", csv_path_.c_str());
-    } else {
-      RCLCPP_WARN(get_logger(), "No se pudo crear CSV: %s", csv_path_.c_str());
-    }
+    omx::openCsv(csv_, csv_path_,
+      "t,"
+      "q1,q2,q3,q4,"
+      "dq1,dq2,dq3,dq4,"
+      "tau_g1,tau_g2,tau_g3,tau_g4,"
+      "tau_pd1,tau_pd2,tau_pd3,tau_pd4,"
+      "tau1,tau2,tau3,tau4",
+      get_logger());
 
     // ── Comunicaciones ────────────────────────────────────────────────────────
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
-
-    joint_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
-      "/joint_states", 10,
-      [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
-        last_js_ = msg;
-      });
 
     // ── Timer 100 Hz ──────────────────────────────────────────────────────────
     start_time_ = std::chrono::high_resolution_clock::now();
@@ -144,45 +129,18 @@ public:
   }
 
 private:
-  // ── Lectura de /joint_states por nombre (orden-independiente) ────────────────
-
-  void read_js(Eigen::Vector4d & q, Eigen::Vector4d & dq)
-  {
-    static const std::array<std::string, NARM> names = {
-      "joint1", "joint2", "joint3", "joint4"
-    };
-    q.setZero();
-    dq.setZero();
-    if (!last_js_) { return; }
-    const auto & js = *last_js_;
-    for (int j = 0; j < NARM; ++j) {
-      for (std::size_t i = 0; i < js.name.size(); ++i) {
-        if (js.name[i] == names[j]) {
-          if (i < js.position.size()) { q[j]  = js.position[i]; }
-          if (i < js.velocity.size()) { dq[j] = js.velocity[i]; }
-          break;
-        }
-      }
-    }
-  }
-
-  // ── G(q) = RNEA(q, 0, 0) — torque de gravedad puro ──────────────────────────
+  // ── G(q) — torque de gravedad puro (RNEA con dq = ddq = 0) ──────────────────
 
   Eigen::Vector4d compute_gravity(const Eigen::Vector4d & q)
   {
-    Eigen::VectorXd q_pin  = Eigen::VectorXd::Zero(model_.nv);
-    Eigen::VectorXd zero_v = Eigen::VectorXd::Zero(model_.nv);
-    q_pin.head<NARM>() = q;
-    const Eigen::VectorXd tau_full =
-      pinocchio::rnea(model_, data_, q_pin, zero_v, zero_v);
-    return gravity_scale_ * tau_full.head<NARM>();
+    return gravity_scale_ * model_.gravity(q);
   }
 
   // ── Tick de control (100 Hz) ──────────────────────────────────────────────────
 
   void tick()
   {
-    if (!last_js_) { return; }
+    if (!js_.ready()) { return; }
 
     const auto tp = std::chrono::high_resolution_clock::now();
     const double t = std::chrono::duration<double>(tp - start_time_).count();
@@ -199,7 +157,7 @@ private:
 
     // 1. Leer estado articular
     Eigen::Vector4d q, dq;
-    read_js(q, dq);
+    js_.read(q, dq);
 
     // 2. Termino de compensacion gravitacional: G(q)
     const Eigen::Vector4d tau_grav = compute_gravity(q);
@@ -244,17 +202,15 @@ private:
 
   // ── Miembros ─────────────────────────────────────────────────────────────────
 
-  pinocchio::Model model_;
-  pinocchio::Data  data_;
+  omx::RobotModel model_;
 
   double gravity_scale_;
   double Kp_, Kd_;
   double t_sim_;
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
-  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  joint_sub_;
+  omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)
   rclcpp::TimerBase::SharedPtr timer_;
-  sensor_msgs::msg::JointState::SharedPtr last_js_;
 
   std::chrono::high_resolution_clock::time_point start_time_;
 
