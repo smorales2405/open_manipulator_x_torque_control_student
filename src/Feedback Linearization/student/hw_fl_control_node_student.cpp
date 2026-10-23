@@ -20,12 +20,11 @@
  *   - Calculo de M(q) y nle(q,dq) mediante Pinocchio (en compute_torque)
  *   - Conversion torque -> corriente via modelo OLS identificado
  *     (motorXM430W350T_params.yaml); el termino de Coulomb usa la velocidad
- *     DESEADA (senal sin ruido: sin chattering y con empuje de despegue)
+ *     DESEADA 
  *   - Saturacion del torque a +/-tau_max antes de enviar corriente
  *   - Transicion quintica de 3 s desde la posicion inicial hasta el inicio de la trayectoria
  *   - Retorno quintico al reposo en q_inicial al completar t_run + pausa en
- *     reposo antes de cortar corriente (evita que el brazo caiga por
- *     gravedad al recibir torque cero de golpe en medio de la trayectoria)
+ *     reposo antes de cortar corriente 
  *   - Verificacion de limites articulares y de corriente medida (parada de emergencia)
  *   - Deteccion de overruns del lazo de control
  *   - Publicador /hw/joint_states y escritura de CSV (el retorno final y la
@@ -118,9 +117,6 @@ using omx::Reference;   // {q, dq, ddq}
 //    ref.dq  << dq1_des(t),    dq2_des(t),    dq3_des(t),    dq4_des(t);
 //    ref.ddq << ddq1_des(t),   ddq2_des(t),   ddq3_des(t),   ddq4_des(t);
 //
-//  Nota: esta funcion se llama para t >= RAMP_TIME_S.
-//        Para t < RAMP_TIME_S se aplica la transicion quintica
-//        automaticamente (ver quinticTransition — no modificar).
 // ═══════════════════════════════════════════════════════════════════════════
 
 static Reference desiredTrajectory(double t)
@@ -146,20 +142,18 @@ static Reference desiredTrajectory(double t)
 //  SECCION 2 — GANANCIAS DEL CONTROLADOR
 //
 //  Definir KP y KD para cada articulacion: [j1, j2, j3, j4]
-//    KP — ganancias proporcionales  [adim]
-//    KD — ganancias derivativas     [adim]
+//    KP — ganancias proporcionales  
+//    KD — ganancias derivativas     
 //
 //  gain_scale_ escala KP linealmente y KD con su raiz cuadrada
 //
-//  Sugerencia: con FL exacto, la dinamica del error por joint es
-//    e'' + kd*e' + kp*e = 0   →   amortiguamiento zeta = kd/(2*sqrt(kp))
-//  Mantener kd ≈ 1.4*sqrt(kp) (zeta ≈ 0.7) evita oscilaciones subamortiguadas.
-//  Recordar ademas que el torque de feedback es M(q)*v: articulaciones con
+//  Sugerencia: 
+//  El torque de feedback es M(q)*v: articulaciones con
 //  inercia pequena (munecas) necesitan kp mayores para vencer la friccion.
 // ═══════════════════════════════════════════════════════════════════════════
-static const Eigen::Vector4d KP = {0.0 /* kp1 */, 0.0 /* kp2 */, 0.0 /* kp3 */, 0.0 /* kp4 */};   // COMPLETAR
-static const Eigen::Vector4d KD = {0.0 /* kd1 */, 0.0 /* kd2 */, 0.0 /* kd3 */, 0.0 /* kd4 */};   // COMPLETAR
-// TAU_MAX disponible como hw_.limits.tau_max (cargado desde motorXM430W350T_params.yaml, default 1.2 N·m)
+static const Eigen::Vector4d KP = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR
+static const Eigen::Vector4d KD = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR
+
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ============================================================
@@ -278,12 +272,6 @@ private:
     //    nle4 (4×1)             — efectos no lineales      nle(q, dq)
     //    kp, kd                 — ganancias escaladas
     //
-    //  Ley de control:
-    //    e   = ref.q  - q              (error de posicion)
-    //    de  = ref.dq - dq             (error de velocidad)
-    //    v   = ref.ddq + kp.*e + kd.*de  (entrada auxiliar)
-    //    tau = M4 * v + nle4           (torque de control)
-    //
     //  Resultado: retornar tau (Vec4)
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -297,8 +285,7 @@ private:
   //  Conversion torque -> corriente via modelo OLS identificado
   //    I_cmd = alpha*tau + Fv*dq + fc_scale*Fc*tanh(dq_des/epsilon) + I_offset
   //  Fv usa la velocidad medida (termino suave); Fc usa la velocidad DESEADA:
-  //  senal sin ruido → sin chattering, y aporta el empuje de despegue justo
-  //  cuando la referencia arranca (con dq medida ≈ 0 el tanh muere pegado).
+  //  y aporta el empuje de despegue justo cuando la referencia arranca 
   // ─────────────────────────────────────────────────────────────────────────
 
   // ─────────────────────────────────────────────────────────────────────────

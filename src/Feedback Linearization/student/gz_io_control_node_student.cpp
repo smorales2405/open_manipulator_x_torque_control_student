@@ -87,17 +87,17 @@ static constexpr double HOLD_TIME_S   = 0.5;
 // ═══════════════════════════════════════════════════════════════════════════
 //  SECCION 1 — TRAYECTORIA DE REFERENCIA CARTESIANA
 //
-//  COMPLETAR: Definir y_des(t'), ydot_des(t') e yddot_des(t').
+//  COMPLETAR: Definir y_des(t), ydot_des(t) e yddot_des(t).
 //
 //  Parametro de entrada:
-//    tp  — tiempo relativo al inicio de la fase circular [s]  (tp = t - T_TRANS)
+//    t   — tiempo desde el fin de la transicion inicial [s]
 //
 //  Salida esperada (llenar ref.y, ref.ydot, ref.yddot):
-//    ref.y    = [x_des(tp), y_des(tp), z_des(tp), phi_des(tp)]
+//    ref.y    = [x_des(t), y_des(t), z_des(t), phi_des(t)]
 //    ref.ydot = primera derivada temporal de ref.y (analitica)
 //    ref.yddot= segunda derivada temporal de ref.y (analitica)
 //
-//  Parametros configurables (ajustar si es necesario):
+//  Parametros configurables:
 //    T_TRANS — duracion de la fase de transicion inicial [s]
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -113,7 +113,7 @@ static CartRef circularTrajectory(double t)
   CartRef ref;
 
   // -------------------------------------------------------------------
-  // COMPLETAR: implementar aqui
+  // COMPLETAR
   // -------------------------------------------------------------------
 
   (void)t;
@@ -135,16 +135,12 @@ static CartRef circularTrajectory(double t)
 //
 //  COMPLETAR 1a: Asignar las ganancias cartesianas Kp_y y Kd_y.
 //    Indice:  [x, y, z, phi]
-//    Referencia de disenio:
-//      - Sistema de 2do orden desacoplado: wn = sqrt(Kp_y),  zeta = Kd_y/(2*wn)
-//      - Para amortiguamiento critico:     Kd_y = 2*sqrt(Kp_y)
-//      - La frecuencia natural debe ser >> frecuencia de la trayectoria
 //
 //  COMPLETAR 1b: Definir Y_START — punto inicial de la trayectoria circular.
-//    Debe coincidir con ref.y en t'=0 (i.e., circularTrajectory(0)).
+//    Debe coincidir con ref.y en t=0 (i.e., circularTrajectory(0)).
 //    El robot parte de su pose Gazebo y transiciona hacia Y_START en T_TRANS s.
 //
-//  Parametros configurables (ajustar si es necesario):
+//  Parametros configurables:
 //    TAU_MAX — saturacion de torque por articulacion [N·m]  
 //    LAMBDA  — factor de amortiguamiento DLS (rango tipico: 0.01 – 0.05)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -318,18 +314,10 @@ private:
     //    LAMBDA        — lambda para la pseudo-inversa DLS
     //    TAU_MAX       — saturacion de torque
     //
-    //  Ley de control IO Linearization:
-    //    ey     = ref.y - y
-    //    eydot  = ref.ydot - ydot
-    //    v      = ref.yddot + Kp_y*ey + Kd_y*eydot
-    //    A      = J4*J4^T + lambda^2 * I          (matriz auxiliar DLS)
-    //    qddot  = J4^T * A^-1 * (v - Jdot*dq)    (pseudo-inversa DLS)
-    //    tau    = M(q) * qddot + b(q,dq)
-    //    tau_sat = clamp(tau, -TAU_MAX, TAU_MAX)
     // ══════════════════════════════════════════════════════════════════════
 
     (void)M4; (void)nle4;   // suprimir warnings mientras la seccion esta incompleta
-    Eigen::Vector4d tau_sat = Eigen::Vector4d::Zero();   // <-- reemplazar con implementacion
+    Eigen::Vector4d tau_sat = Eigen::Vector4d::Zero();   // <-- reemplazar 
 
     // ══════════════════════════════════════════════════════════════════════
 

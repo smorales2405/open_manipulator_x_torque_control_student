@@ -8,8 +8,6 @@
  *   phi = q2 + q3 + q4  angulo de inclinacion analitico.
  *
  * Ley de control a implementar:
- *   v     = yddot_des + Kp_y*(y_des - y) + Kd_y*(ydot_des - ydot)
- *   qddot = J4^T * (J4*J4^T + lambda^2*I)^-1 * (v - Jdot*dq)  [DLS]
  *   tau   = M(q)*qddot + nle(q, dq)
  *
  * Completar las tres secciones marcadas:
@@ -28,13 +26,11 @@
  *   - Transicion inicial suave (5to orden): pose inicial medida → Y_START
  *   - Conversion torque -> corriente via modelo OLS identificado
  *     (motorXM430W350T_params.yaml); el termino de Coulomb usa la velocidad
- *     articular DESEADA qdot_des = J4+ * ydot_des (senal sin ruido: sin
- *     chattering y con empuje de despegue contra la friccion estatica)
+ *     articular DESEADA qdot_des = J4+ * ydot_des 
  *   - Saturacion defensiva del torque a +/-tau_max antes de enviar corriente
  *   - Guardas de altura minima Z_MIN_FLOOR (referencia y efector medido)
  *   - Retorno cartesiano al reposo en y_inicial al completar t_run + pausa en
- *     reposo antes de cortar corriente (evita que el brazo caiga por
- *     gravedad al recibir torque cero de golpe en medio de la trayectoria)
+ *     reposo antes de cortar corriente
  *   - Verificacion de limites articulares y de corriente medida (parada de emergencia)
  *   - Deteccion de overruns del lazo de control
  *   - Publicador /hw/joint_states y escritura de CSV (el retorno final y la
@@ -109,10 +105,10 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //  SECCION 1 — TRAYECTORIA DESEADA CARTESIANA
 //
 //  Definir ref.y, ref.ydot y ref.yddot como funciones del tiempo t
-//  (tiempo relativo al inicio de la fase de trayectoria: t' = t - T_TRANS).
+//  (t medido desde el fin de la transicion inicial: t = 0 al terminar T_TRANS).
 //
 //  Parametro de entrada:
-//    t   — tiempo relativo desde el fin de la transicion [s]  (t' = t - T_TRANS)
+//    t   — tiempo desde el fin de la transicion inicial [s]
 //
 //  Salida esperada:
 //    ref.y    << x_des(t),    y_des(t),    z_des(t),    phi_des(t);
@@ -121,31 +117,22 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //
 //  Nota: ref.y en t=0 debe coincidir con Y_START (punto de inicio de la
 //        transicion quintica) para garantizar continuidad.
-//        Verificar: cartesianTrajectory(0).y == Y_START
 //
 //  Parametros configurables:
 //    T_TRANS — duracion de la fase de transicion inicial [s]
 //
-//  Restricciones de seguridad al diseniar la trayectoria:
-//    - z_des(t) debe mantenerse SIEMPRE por encima de Z_MIN_FLOOR mas un
-//      margen de tracking (~2.5 cm); la infraestructura detiene el nodo si
-//      la referencia o el efector medido bajan de Z_MIN_FLOOR.
-//    - Evitar extension maxima con z minimo simultaneos: verificar con IK
-//      que la trayectoria completa respeta los limites articulares.
 // ═══════════════════════════════════════════════════════════════════════════
 
 static constexpr double T_TRANS       = 3.0;   // duracion de la transicion inicial [s]
 static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno cartesiano a y_inicial
 static constexpr double HOLD_TIME_S   = 0.5;   // pausa en reposo antes de cortar corriente
 
-// Punto de inicio de la trayectoria cartesiana [x, y, z, phi] en t'=0
+// Punto de inicio de la trayectoria cartesiana [x, y, z, phi] en t=0
 // Debe coincidir con cartesianTrajectory(0).
 static const Eigen::Vector4d Y_START{0.0, 0.0, 0.0, 0.0};
 
 // Altura minima del efector sobre la placa metalica de la base [m].
-// Guarda de infraestructura: se verifica en cada tick para la referencia y
-// para el efector medido (durante la transicion solo se exige no descender
-// por debajo de la pose inicial, que puede arrancar plegada).
+// Se verifica en cada tick para la referencia y para el efector medido
 static constexpr double Z_MIN_FLOOR = 0.075;
 
 static constexpr char EFF_FRAME_NAME[] = "end_effector_link";
@@ -175,24 +162,15 @@ static CartRef cartesianTrajectory(double t)
 //  SECCION 2 — GANANCIAS DEL CONTROLADOR
 //
 //  Definir KP_Y y KD_Y para cada componente de la salida: [x, y, z, phi]
-//    KP_Y — ganancias proporcionales cartesianas  [adim]
-//    KD_Y — ganancias derivativas cartesianas     [adim]
-//
-//  Referencia de disenio (sistema de 2do orden desacoplado):
-//    wn   = sqrt(KP_Y)         — frecuencia natural
-//    zeta = KD_Y / (2 * wn)   — coeficiente de amortiguamiento
-//    Para amortiguamiento critico: KD_Y = 2 * sqrt(KP_Y)
-//    La frecuencia natural debe ser >> frecuencia de la trayectoria
+//    KP_Y — ganancias proporcionales cartesianas 
+//    KD_Y — ganancias derivativas cartesianas    
 //
 //  Sugerencias practicas para hardware:
-//    - zeta ≈ 0.7 funciona bien: KD_Y = 1.4 * sqrt(KP_Y). Con KD_Y = 0 el
-//      lazo de tarea es un oscilador puro (zeta = 0): vibrara en el robot.
 //    - Las direcciones z y phi las dominan las munecas (inercia diminuta):
-//      necesitan KP_Y bastante mayores que x/y para vencer la friccion
-//      estatica (de lo contrario quedan "pegadas" con error grande).
+//      necesitan KP_Y bastante mayores que x/y para vencer la friccion estatica
 // ═══════════════════════════════════════════════════════════════════════════
-static const Eigen::Vector4d KP_Y = {0.0 /* kpx */, 0.0 /* kpy */, 0.0 /* kpz */, 0.0 /* kpphi */};
-static const Eigen::Vector4d KD_Y = {0.0 /* kdx */, 0.0 /* kdy */, 0.0 /* kdz */, 0.0 /* kdphi */};
+static const Eigen::Vector4d KP_Y = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR [x, y, z, phi]
+static const Eigen::Vector4d KD_Y = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR [x, y, z, phi]
 // ═══════════════════════════════════════════════════════════════════════════
 
 // TAU_MAX disponible como hw_.limits.tau_max (cargado desde motorXM430W350T_params.yaml, default 1.2 N·m)
@@ -368,18 +346,15 @@ private:
     //    gain_scale_             — factor de escala de ganancias
     //    TAU_MAX                 — saturacion de torque
     //
-    //  Ley de control:
-    //    ey    = ref.y    - y_actual          (error de posicion)
-    //    eydot = ref.ydot - ydot              (error de velocidad)
-    //    v     = ref.yddot + Kp_y.*ey + Kd_y.*eydot  (entrada auxiliar)
-    //    A     = J4*J4^T + lambda^2 * I       (matriz DLS)
-    //    qddot = J4^T * A^-1 * (v - jdqd)    (pseudo-inversa DLS)
-    //    tau   = M4 * qddot + nle4            (torque de control)
-    //    tau_sat = clamp(tau, -TAU_MAX, TAU_MAX)
     // ═══════════════════════════════════════════════════════════════════════
 
     // -- COMPLETAR --
-    (void)M4; (void)nle4; (void)jdqd;
+    
+    // Aplicar escala de ganancia (gain_scale_)
+    const Eigen::Vector4d kp_y = KP_Y * gain_scale_;
+    const Eigen::Vector4d kd_y = KD_Y * std::sqrt(std::max(gain_scale_, 0.0));
+
+    (void)M4; (void)nle4; (void)jdqd; (void)kp_y; (void)kd_y;
     const Eigen::Vector4d tau_sat = Vec4::Zero();  // reemplazar con tau calculado
     // ════════════════
 
