@@ -2,7 +2,7 @@
 //  gz_MRAC_joint_12p_node_student.cpp
 //  Control Adaptativo (MRAC / Slotine-Li) articular — 12 PARAMETROS
 //  OpenMANIPULATOR-X (Gazebo) — campana sim-to-real
-//  [Archivo base para estudiantes — Lab 7]
+//  [Archivo base para estudiantes — MRAC]
 //
 //  Parametros adaptados (12):
 //    a_hat = [ alpha1..alpha3 , dm, dmcx, dmcy, dmcz , Fv1 , Fc1..Fc4 ]^T
@@ -50,7 +50,7 @@
 //    friction_prior  [bool]    true  — true: prior = friccion identificada
 //                                      false: prior de friccion en cero
 //
-//  CSV: data/lab7/sim/mrac12p/gz_mrac_joint_12p_<modo>_<test_num>.csv
+//  CSV: data/mrac/sim/mrac12p/gz_mrac_joint_12p_<modo>_<test_num>.csv
 //  Columnas: t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des,
 //            s1..s4, tau1..tau4, sat1..sat4,
 //            a1_hat..a3_hat, dm_hat, dmcx_hat, dmcy_hat, dmcz_hat,
@@ -336,7 +336,7 @@ private:
   // ── CSV (infraestructura, no modificar) ────────────────────────────────────
   void open_csv(int test_num)
   {
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab7/sim/mrac12p/gz_mrac_joint_12p_"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/mrac/sim/mrac12p/gz_mrac_joint_12p_"
                 + mode_str_ + "_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,"

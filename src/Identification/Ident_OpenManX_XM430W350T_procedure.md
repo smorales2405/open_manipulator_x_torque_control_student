@@ -349,7 +349,7 @@ distintos modelos en el YAML) dio k = 0.994–1.003 en J2/J3, es decir
 act2 (J4 se mueve) J4 dio k = 0.98–1.00. Se genera el fragmento
 `data/identification/alpha_fit_log30.yaml`.
 
-> Un log del nodo FL (`data/lab4/real/act1/hw_fl_data_<ID>.csv`) también
+> Un log del nodo FL (`data/feedback_linearization/real/act1/hw_fl_data_<ID>.csv`) también
 > sirve, con cualquier modelo en el YAML: `identify_alpha.py` lo usa si no
 > existe un `hw_alpha_ident_<ID>.csv` con el mismo ID (avisa cuando hay más de
 > uno).

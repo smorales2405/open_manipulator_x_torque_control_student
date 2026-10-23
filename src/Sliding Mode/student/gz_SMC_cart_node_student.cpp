@@ -1,7 +1,7 @@
 // ============================================================================
 //  gz_SMC_cart_node_student.cpp
 //  Control por Modo Deslizante en espacio cartesiano — OpenMANIPULATOR-X (Gazebo)
-//  [Archivo base para estudiantes — Lab 6, Actividad 2]
+//  [Archivo base para estudiantes — SMC, Actividad 2]
 //
 //  Salida cartesiana reducida:
 //    y = [x_ee, y_ee, z_ee, phi]^T
@@ -41,7 +41,7 @@
 //    rho_func  [string]  "sign"   — funcion de conmutacion: "sign" | "sat"
 //    phi       [double]  0.15     — capa limite [m/s o rad/s]
 //
-//  CSV: data/lab6/sim/act2/gz_smc_cart_<rho_func>_<test_num>.csv
+//  CSV: data/smc/sim/act2/gz_smc_cart_<rho_func>_<test_num>.csv
 //  Columnas: t, q1..q4, x,y,z,phi, x_des,y_des,z_des,phi_des,
 //            xdot,ydot,zdot,phidot, xdot_des,ydot_des,zdot_des,phidot_des,
 //            s1,s2,s3,s4, tau1..tau4, cond_J
@@ -322,7 +322,7 @@ private:
   // ── CSV ───────────────────────────────────────────────────────────────────
   void open_csv(int test_num)
   {
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab6/sim/act2/gz_smc_cart_"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/smc/sim/act2/gz_smc_cart_"
                 + rho_str_ + "_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,"

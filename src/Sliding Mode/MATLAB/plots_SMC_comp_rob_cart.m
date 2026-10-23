@@ -1,6 +1,6 @@
 %% plots_SMC_comp_rob_cart.m
 % Graficas COMPARATIVAS de ROBUSTEZ — Control SMC Cartesiano
-% OpenMANIPULATOR-X, Laboratorio 6 — Actividad 2
+% OpenMANIPULATOR-X, Sliding Mode Control — Actividad 2
 %
 %   Compara dos ensayos: caso nominal vs caso con perturbacion
 %     robustness_test = 'params'  -> con y sin incertidumbre parametrica
@@ -54,13 +54,13 @@ end
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
 switch mode
     case 'sim'
-        data_dir   = fullfile(pkg_dir, 'data',  'lab6', 'sim',  'act2');
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'sim',  'act2', 'comp_rob');
+        data_dir   = fullfile(pkg_dir, 'data',  'smc', 'sim',  'act2');
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim',  'act2', 'comp_rob');
         mode_label = 'Simulacion';
         prefix     = 'gz_smc_cart';
     case 'real'
-        data_dir   = fullfile(pkg_dir, 'data',  'lab6', 'real', 'act2');
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'real', 'act2', 'comp_rob');
+        data_dir   = fullfile(pkg_dir, 'data',  'smc', 'real', 'act2');
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act2', 'comp_rob');
         mode_label = 'Implementacion';
         prefix     = 'hw_smc_cart';
     otherwise

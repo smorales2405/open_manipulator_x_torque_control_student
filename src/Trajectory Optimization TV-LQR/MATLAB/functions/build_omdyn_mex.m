@@ -1,14 +1,14 @@
 %% build_omdyn_mex.m
 % Compila OMDyn.m y open_manx_fkin.m de ESTA carpeta a MEX (MATLAB Coder).
 %
-% Motivacion (Lab 5): fmincon calcula los gradientes por diferencias finitas
+% Motivacion (TV-LQR): fmincon calcula los gradientes por diferencias finitas
 % densas — con N=40 nodos son ~481 evaluaciones de restr/Jcosto por iteracion,
 % es decir ~77,000 llamadas a OMDyn por iteracion. OMDyn.m interpretado toma
 % ~80 us/llamada; compilado a MEX baja a ~1-2 us, reduciendo el tiempo por
 % iteracion de ~6-12 s a <1 s (aun mas combinado con USE_PARALLEL).
 %
 % El binario OMDyn.<mexext> tiene PRECEDENCIA sobre OMDyn.m en la misma
-% carpeta: lab5_act1_sol.m / lab5_act2_sol.m lo usan automaticamente sin
+% carpeta: tv_lqr_act1_sol.m / tv_lqr_act2_sol.m lo usan automaticamente sin
 % ningun cambio de codigo. Lo mismo aplica a open_manx_fkin.
 %
 % Uso:

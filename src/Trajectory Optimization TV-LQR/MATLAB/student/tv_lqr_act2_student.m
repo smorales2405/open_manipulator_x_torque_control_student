@@ -1,5 +1,5 @@
-%% lab5_act2_student.m
-% Trajectory Optimization y TV-LQR — Laboratorio 5, Actividad 2
+%% tv_lqr_act2_student.m
+% Trajectory Optimization y TV-LQR — Actividad 2
 % Control de Sistemas No Lineales — OpenMANIPULATOR-X de 4 GDL
 %
 % Objetivo: Mismo x0 y yf que Act. 1, evitando el obstaculo MDF.
@@ -250,7 +250,7 @@ metrics_trajopt.exitflag     = exitflag;
 metrics_trajopt.max_abs_uref = max(abs(Uref), [], 2);
 
 fprintf('\n============================================================\n');
-fprintf('Lab 5 Actividad 2 - Metricas de la trayectoria optimizada\n');
+fprintf('TV-LQR Actividad 2 - Metricas de la trayectoria optimizada\n');
 fprintf('============================================================\n');
 fprintf('Exitflag fmincon                 : %g\n',   metrics_trajopt.exitflag);
 fprintf('Max |u_ref| por articulacion     : [%s] N.m\n', ...
@@ -373,7 +373,7 @@ metrics_tvlqr.max_abs_joint_error = max(abs(joint_error), [], 2);
 metrics_tvlqr.rms_joint_error     = sqrt(mean(joint_error.^2, 2));
 
 fprintf('\n============================================================\n');
-fprintf('Lab 5 Actividad 2 - Metricas de seguimiento TV-LQR\n');
+fprintf('TV-LQR Actividad 2 - Metricas de seguimiento TV-LQR\n');
 fprintf('============================================================\n');
 fprintf('Error cartesiano final ||y(tf)-yf||: %.6f m\n',  metrics_tvlqr.final_error_cart);
 fprintf('Max |u_TVLQR| por articulacion    : [%s] N.m\n', num2str(metrics_tvlqr.max_abs_utvlqr', ' %.4f'));
@@ -538,7 +538,7 @@ title(tl5, 'Señal de control TV-LQR vs referencia — Act. 2', ...
 %  ========================================================================
 
 if EXPORT_FIGS
-    out_dir = fullfile(pkg_dir, 'plots', 'lab5', 'matlab', 'act2');
+    out_dir = fullfile(pkg_dir, 'plots', 'tv_lqr', 'matlab', 'act2');
     if ~exist(out_dir, 'dir'), mkdir(out_dir); end
     fig_names = {'act2_qref', 'act2_uref', 'act2_tvlqr_seguimiento', ...
                  'act2_trayectoria_3d', 'act2_tvlqr_control'};

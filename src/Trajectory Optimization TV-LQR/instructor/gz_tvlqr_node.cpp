@@ -32,7 +32,7 @@
 //  Suscriptor : /joint_states                   (sensor_msgs/JointState)
 //  Publicador : /arm_effort_controller/commands  (std_msgs/Float64MultiArray)
 //
-//  CSV generado: data/lab5/sim/act<act_num>/data_log_sim_lab5_<test_num>.csv
+//  CSV generado: data/tv_lqr/sim/act<act_num>/data_log_sim_tv_lqr_<test_num>.csv
 //  (incluye u_ref del instante k — el post-procesado no necesita references/)
 // ============================================================================
 
@@ -239,9 +239,9 @@ private:
   // ── CSV ───────────────────────────────────────────────────────────────────
   void open_csv(int test_num, int act_num)
   {
-    const std::string data_dir = std::string(PACKAGE_DATA_DIR) + "/lab5/sim/act"
+    const std::string data_dir = std::string(PACKAGE_DATA_DIR) + "/tv_lqr/sim/act"
                                  + std::to_string(act_num);
-    csv_path_ = data_dir + "/data_log_sim_lab5_" + std::to_string(test_num) + ".csv";
+    csv_path_ = data_dir + "/data_log_sim_tv_lqr_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,"
       "q1,q2,q3,q4,"

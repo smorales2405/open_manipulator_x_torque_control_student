@@ -64,7 +64,7 @@ Veredicto (sobre los joints excitados):
 
 Entrada (autodetectada en este orden; --csv para forzar una ruta):
     data/identification/alpha/hw_alpha_ident_<ID>.csv    (alpha_ident.launch.py) ← recomendado
-    data/lab4/real/act1/hw_fl_data_<ID>.csv              (hw_fl_control_node, cualquier modelo)
+    data/feedback_linearization/real/act1/hw_fl_data_<ID>.csv  (hw_fl_control_node, cualquier modelo)
     data/diagnostics/sinusoidal/hw_sin_torque_<ID>.csv   (joints en mode="current")
 
 Salidas:
@@ -149,7 +149,7 @@ else:
     cands = [
         os.path.join(PKG_DIR, "data", "identification", "alpha",
                      f"hw_alpha_ident_{args.log_id}.csv"),
-        os.path.join(PKG_DIR, "data", "lab4", "real", "act1",
+        os.path.join(PKG_DIR, "data", "feedback_linearization", "real", "act1",
                      f"hw_fl_data_{args.log_id}.csv"),
         os.path.join(PKG_DIR, "data", "diagnostics", "sinusoidal",
                      f"hw_sin_torque_{args.log_id}.csv"),

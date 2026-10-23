@@ -1,5 +1,5 @@
-%% lab5_act1_student.m
-% Trajectory Optimization y TV-LQR — Laboratorio 5, Actividad 1
+%% tv_lqr_act1_student.m
+% Trajectory Optimization y TV-LQR — Actividad 1
 % Control de Sistemas No Lineales — OpenMANIPULATOR-X de 4 GDL
 %
 % Archivos requeridos en el path de MATLAB:
@@ -421,7 +421,7 @@ title(tl4, 'Señal de control aplicada: TV-LQR vs referencia', ...
 %  ========================================================================
 
 if EXPORT_FIGS
-    output_dir = fullfile(pkg_dir, 'plots', 'lab5', 'matlab', 'act1');
+    output_dir = fullfile(pkg_dir, 'plots', 'tv_lqr', 'matlab', 'act1');
     if ~exist(output_dir, 'dir'), mkdir(output_dir); end
     fig_names = {'act1_qref_optimo', 'act1_uref_optimo', ...
                  'act1_tvlqr_seguimiento_q', 'act1_tvlqr_trayectoria_cart', 'act1_tvlqr_control'};
@@ -517,7 +517,7 @@ end
 
 function printMetricsTrajOpt(metrics_trajopt)
     fprintf('\n============================================================\n');
-    fprintf('Lab 5 Actividad 1 - Metricas de la trayectoria optimizada\n');
+    fprintf('TV-LQR Actividad 1 - Metricas de la trayectoria optimizada\n');
     fprintf('============================================================\n');
     fprintf('Exitflag fmincon                 : %g\n',   metrics_trajopt.exitflag);
     fprintf('Max |u_ref| por articulacion      : [%s] N.m\n', ...
@@ -526,7 +526,7 @@ end
 
 function printMetricsTVLQR(metrics_tvlqr)
     fprintf('\n============================================================\n');
-    fprintf('Lab 5 Actividad 1 - Metricas de seguimiento TV-LQR\n');
+    fprintf('TV-LQR Actividad 1 - Metricas de seguimiento TV-LQR\n');
     fprintf('============================================================\n');
     fprintf('Error cartesiano final ||y(tf)-yf||: %.6f\n',    metrics_tvlqr.final_error_cart);
     fprintf('Max |u_TVLQR| por articulacion    : [%s] N.m\n', ...

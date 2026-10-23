@@ -2,7 +2,7 @@
   ros__parameters:
 
     # ── Parámetros de conversión torque→corriente (OpenMANIPULATOR-X) ────────
-    # Identificados con OLS a partir de hw_fl_data_17.csv (Lab 4, Acto 1)
+    # Identificados con OLS a partir de hw_fl_data_17.csv (FL, Acto 1)
     # Modelo: I_cmd[i] = α[i]·τ[i] + Fv[i]·dq[i] + Fc[i]·tanh(dq[i]/ε) + I_offset[i]
     #
     # Unidades:

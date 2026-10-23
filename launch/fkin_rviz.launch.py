@@ -73,7 +73,7 @@ def generate_launch_description():
     )
 
     # ── joint_state_publisher_gui (sliders) ───────────────────────────────
-    # Los sliders arrancan en la posicion x0 del Lab 5.
+    # Los sliders arrancan en la posicion x0 del TV-LQR.
     # Nombres de joints del URDF oficial: joint1-4, gripper_left_joint, gripper_right_joint
     jsp_gui_node = Node(
         package='joint_state_publisher_gui',
@@ -83,7 +83,7 @@ def generate_launch_description():
         parameters=[{
             'robot_description': robot_description,
             'zeros': {
-                'joint1':             0.0,   # pi/2  (x0 lab5)
+                'joint1':             0.0,   # pi/2  (x0 TV-LQR)
                 'joint2':             0.0,
                 'joint3':             0.5236,   # pi/6
                 'joint4':             1.0472,   # pi/3

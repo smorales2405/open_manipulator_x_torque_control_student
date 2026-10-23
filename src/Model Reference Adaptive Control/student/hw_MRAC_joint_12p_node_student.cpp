@@ -2,7 +2,7 @@
  * hw_MRAC_joint_12p_node_student.cpp
  * Control Adaptativo (MRAC / Slotine-Li) articular de 12 PARAMETROS —
  * OpenMANIPULATOR-X hardware real via Dynamixel SDK directo, sin ros2_control.
- * [Archivo base para estudiantes — Lab 7]
+ * [Archivo base para estudiantes — MRAC]
  *
  * Parametros adaptados (12):
  *   a_hat = [ alpha1..alpha3 , dm, dmcx, dmcy, dmcz , Fv1_res , Fc1..Fc4_res ]^T
@@ -75,7 +75,7 @@
  * (aborta si la corriente comandada promedia >80% del limite — la antesala
  * de la proteccion interna del servo, que corta torque en movimiento).
  *
- * CSV: data/lab7/real/mrac12p/hw_mrac_joint_12p_<modo>_<test_num>.csv
+ * CSV: data/mrac/real/mrac12p/hw_mrac_joint_12p_<modo>_<test_num>.csv
  * (columnas compatibles con plots_MRAC_joint_12p.m, mode='real', + extras hw)
  *
  * Ejemplos de ejecucion:
@@ -344,7 +344,7 @@ public:
     }
 
     // ── CSV (no modificar) ───────────────────────────────────────────────────
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab7/real/mrac12p/hw_mrac_joint_12p_"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/mrac/real/mrac12p/hw_mrac_joint_12p_"
                 + mode_str_ + "_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,q1,q2,q3,q4,dq1,dq2,dq3,dq4,"

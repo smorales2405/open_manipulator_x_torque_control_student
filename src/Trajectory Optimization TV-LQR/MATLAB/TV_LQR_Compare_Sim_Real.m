@@ -1,9 +1,9 @@
-%% Lab5_Compare_Sim_Real.m
+%% TV_LQR_Compare_Sim_Real.m
 % Compara metricas y graficas entre la simulacion en Gazebo y la
-% implementacion en hardware del Lab 5 (TV-LQR, Actividad 1).
+% implementacion en hardware del TV-LQR (Actividad 1).
 %
 % Requiere haber ejecutado el nodo en ambas modalidades y tener los CSV
-% correspondientes en data/lab5/sim/ y data/lab5/real/.
+% correspondientes en data/tv_lqr/sim/ y data/tv_lqr/real/.
 
 clear; clc; close all;
 
@@ -16,10 +16,10 @@ EXPORT_FIGS = false;
 pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   % raiz del paquete (relativa a este script)
 
 %% ── Carga de datos ───────────────────────────────────────────────────────────
-csv_sim  = fullfile(pkg_dir, 'data', 'lab5', 'sim', ...
-                    sprintf('data_log_sim_lab5_%d.csv',  test_num_sim));
-csv_real = fullfile(pkg_dir, 'data', 'lab5', 'real', ...
-                    sprintf('data_log_real_lab5_%d.csv', test_num_real));
+csv_sim  = fullfile(pkg_dir, 'data', 'tv_lqr', 'sim', ...
+                    sprintf('data_log_sim_tv_lqr_%d.csv',  test_num_sim));
+csv_real = fullfile(pkg_dir, 'data', 'tv_lqr', 'real', ...
+                    sprintf('data_log_real_tv_lqr_%d.csv', test_num_real));
 
 assert(isfile(csv_sim),  'Archivo no encontrado:\n  %s', csv_sim);
 assert(isfile(csv_real), 'Archivo no encontrado:\n  %s', csv_real);
@@ -134,7 +134,7 @@ sgtitle('[Comparacion Sim vs Real] Torques de control', ...
 e_sim  = qs - q_refs;
 e_real = qr - q_refr;
 fprintf('\n======================================================\n');
-fprintf('Comparacion de metricas — Lab5 Actividad 1\n');
+fprintf('Comparacion de metricas — TV-LQR Actividad 1\n');
 fprintf('======================================================\n');
 fprintf('%-32s  %10s  %10s\n', 'Metrica', 'Sim', 'Real');
 fprintf('%s\n', repmat('-', 1, 56));
@@ -162,7 +162,7 @@ end
 
 %% ── Exportacion ──────────────────────────────────────────────────────────────
 if EXPORT_FIGS
-    out_dir = fullfile(pkg_dir, 'plots', 'lab5', 'compare', ...
+    out_dir = fullfile(pkg_dir, 'plots', 'tv_lqr', 'compare', ...
                        sprintf('sim%d_real%d', test_num_sim, test_num_real));
     if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 

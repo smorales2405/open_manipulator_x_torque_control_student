@@ -1,6 +1,6 @@
 %% plots_SMC_q.m
 % Graficas para Actividad 1 — Control por Modo Deslizante en espacio articular
-% OpenMANIPULATOR-X, Laboratorio 6
+% OpenMANIPULATOR-X, Sliding Mode Control
 %
 %   Figura 1 — Seguimiento de posiciones articulares  q1..q4
 %   Figura 2 — Error de seguimiento articular         e_q1..e_q4
@@ -37,15 +37,15 @@ pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   %
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
 switch mode
     case 'sim'
-        csv_file   = fullfile(pkg_dir, 'data', 'lab6', 'sim', 'act1', ...
+        csv_file   = fullfile(pkg_dir, 'data', 'smc', 'sim', 'act1', ...
                               sprintf('gz_smc_joint_%s_%d.csv', rho_func, test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'sim', 'act1', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim', 'act1', ...
                               sprintf('test%d_%s', test_num, rho_func));
         mode_label = 'Simulacion';
     case 'real'
-        csv_file   = fullfile(pkg_dir, 'data', 'lab6', 'real', 'act1', ...
+        csv_file   = fullfile(pkg_dir, 'data', 'smc', 'real', 'act1', ...
                               sprintf('hw_smc_joint_%s_%d.csv', rho_func, test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'real', 'act1', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act1', ...
                               sprintf('test%d_%s', test_num, rho_func));
         mode_label = 'Implementacion';
     otherwise

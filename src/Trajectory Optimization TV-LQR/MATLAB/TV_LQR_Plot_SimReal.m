@@ -1,5 +1,5 @@
-%% Lab5_Plot_SimReal.m
-% Graficas de seguimiento TV-LQR — Laboratorio 5
+%% TV_LQR_Plot_SimReal.m
+% Graficas de seguimiento TV-LQR
 % OpenMANIPULATOR-X
 %
 % Figuras generadas:
@@ -32,15 +32,15 @@ pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   %
 act_dir = sprintf('act%d', act_num);
 switch mode
     case 'sim'
-        csvFile    = fullfile(pkg_dir, 'data', 'lab5', 'sim', act_dir, ...
-                              sprintf('data_log_sim_lab5_%d.csv', test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab5', 'sim', act_dir, ...
+        csvFile    = fullfile(pkg_dir, 'data', 'tv_lqr', 'sim', act_dir, ...
+                              sprintf('data_log_sim_tv_lqr_%d.csv', test_num));
+        output_dir = fullfile(pkg_dir, 'plots', 'tv_lqr', 'sim', act_dir, ...
                               sprintf('test%d', test_num));
         mode_label = 'Simulacion';
     case 'real'
-        csvFile    = fullfile(pkg_dir, 'data', 'lab5', 'real', act_dir, ...
-                              sprintf('data_log_real_lab5_%d.csv', test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab5', 'real', act_dir, ...
+        csvFile    = fullfile(pkg_dir, 'data', 'tv_lqr', 'real', act_dir, ...
+                              sprintf('data_log_real_tv_lqr_%d.csv', test_num));
+        output_dir = fullfile(pkg_dir, 'plots', 'tv_lqr', 'real', act_dir, ...
                               sprintf('test%d', test_num));
         mode_label = 'Hardware';
     otherwise

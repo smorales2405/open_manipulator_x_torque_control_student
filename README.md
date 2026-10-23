@@ -263,9 +263,9 @@ open_manipulator_x_torque_control/
 ├── worlds/
 │   └── empty_world_fortress.sdf      # Empty world for Gazebo Fortress
 ├── data/
-│   ├── lab4/  sim/  real/            # Feedback Linearization experiment data
-│   ├── lab5/  sim/  real/            # TV-LQR experiment data
-│   ├── lab6/  sim/                   # Sliding Mode experiment data
+│   ├── feedback_linearization/  sim/  real/  # Feedback Linearization experiment data
+│   ├── tv_lqr/  sim/  real/          # TV-LQR experiment data
+│   ├── smc/  sim/                    # Sliding Mode experiment data
 │   ├── gravity_comp/                 # Gravity compensation data
 │   ├── identification/               # Motor identification data
 │   └── diagnostics/                  # Diagnostic torque data
@@ -316,16 +316,16 @@ Located at `config/sim_init_config.yaml`. Edit this file **before** launching Ga
 use_fixed_init: true          # false = start at gravity equilibrium
 q_init: [0.0, -0.5, 0.3, 0.785]  # [q1, q2, q3, q4] in radians
 
-# Obstacle (MDF arch, used in TV-LQR Lab 5 Activity 2)
+# Obstacle (MDF arch, used in TV-LQR Activity 2)
 spawn_obstacle: false
 obstacle_pose: [0.1125, 0.0, 0.0, 0.0, 0.0, 1.5708]  # [x,y,z,r,p,yaw]
 
-# Plant dynamics scales (used in Sliding Mode Lab 6 robustness tests)
+# Plant dynamics scales (used in Sliding Mode robustness tests)
 mass_inertia_scale: 1.0   # 1.2 = +20% mass/inertia perturbation
 damping_scale:      1.0   # 1.1 = +10% viscous damping perturbation
 friction_scale:     0.0   # 0.0 = no friction in simulation
 
-# Additional end-effector load (used in Sliding Mode Lab 6 load tests)
+# Additional end-effector load (used in Sliding Mode load tests)
 spawn_load:    false
 load_radius:   0.03    # [m]
 load_height:   0.04    # [m]
@@ -337,13 +337,13 @@ load_x_offset: 0.015   # [m]
 
 | Experiment | `use_fixed_init` | `q_init` | Notes |
 |---|---|---|---|
-| Feedback Linearization (Lab 4) | `true` | `[0,0,0,0]` or free | Nominal plant |
-| TV-LQR Act. 1 (Lab 5) | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: false` |
-| TV-LQR Act. 2 (Lab 5) | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: true` |
-| SMC Articular (Lab 6) | `true` | `[0.0, -0.5, 0.3, 0.785]` | Nominal: `mass_inertia_scale: 1.0` |
+| Feedback Linearization | `true` | `[0,0,0,0]` or free | Nominal plant |
+| TV-LQR Act. 1 | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: false` |
+| TV-LQR Act. 2 | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: true` |
+| SMC Articular | `true` | `[0.0, -0.5, 0.3, 0.785]` | Nominal: `mass_inertia_scale: 1.0` |
 | SMC Articular — incertidumbre | `true` | `[0.0, -0.5, 0.3, 0.785]` | `mass_inertia_scale: 1.2`, `damping_scale: 1.1` |
 | SMC Articular — carga | `true` | `[0.0, -0.5, 0.3, 0.785]` | `spawn_load: true` |
-| SMC Cartesiano (Lab 6) | `false` | — | Robot starts at gravity equilibrium |
+| SMC Cartesiano | `false` | — | Robot starts at gravity equilibrium |
 
 ---
 
@@ -412,7 +412,7 @@ ros2 run open_manipulator_x_torque_control hw_fl_control_node_student \
 | `test_num` / `log_id` | Numeric ID appended to the output CSV filename |
 | `t_run` | Experiment duration in seconds |
 
-Data saved to: `data/lab4/sim/act1/gz_fl_data_<N>.csv` and `data/lab4/real/act1/hw_fl_data_<N>.csv`
+Data saved to: `data/feedback_linearization/sim/act1/gz_fl_data_<N>.csv` and `data/feedback_linearization/real/act1/hw_fl_data_<N>.csv`
 
 **MATLAB post-processing:** run `src/Feedback Linearization/MATLAB/plots_FL_control.m`
 
@@ -434,7 +434,7 @@ ros2 run open_manipulator_x_torque_control hw_io_control_node_student \
     --ros-args -p log_id:=1 -p t_run:=20.0
 ```
 
-Data saved to: `data/lab4/sim/act2/` and `data/lab4/real/act2/`
+Data saved to: `data/feedback_linearization/sim/act2/` and `data/feedback_linearization/real/act2/`
 
 **MATLAB post-processing:** run `src/Feedback Linearization/MATLAB/plots_IO_control.m`
 
@@ -451,18 +451,18 @@ EXPORT_FIGS = false;
 Trajectory generation is done entirely in MATLAB using direct collocation (`fmincon`) and a time-varying LQR gain computed by solving the Riccati equation backwards. The resulting trajectory and gains are exported as text files and consumed by the ROS 2 nodes.
 
 > **Student MATLAB files** (templates to complete):
-> `src/Trajectory Optimization TV-LQR/MATLAB/student/lab5_act1_student.m` (Activity 1),
-> `src/Trajectory Optimization TV-LQR/MATLAB/student/lab5_act2_student.m` (Activity 2 — with MDF obstacle)
+> `src/Trajectory Optimization TV-LQR/MATLAB/student/tv_lqr_act1_student.m` (Activity 1),
+> `src/Trajectory Optimization TV-LQR/MATLAB/student/tv_lqr_act2_student.m` (Activity 2 — with MDF obstacle)
 
 #### Workflow
 
 **Step 1 — Generate trajectory in MATLAB**
 
-Complete and run `lab5_act1_student.m` (or `lab5_act2_student.m`). Then export references to `references/`:
+Complete and run `tv_lqr_act1_student.m` (or `tv_lqr_act2_student.m`). Then export references to `references/`:
 
 ```matlab
-% After lab5_act1_student.m leaves N, Ts, nx, nu, x0, yf, Xref, Uref, K_TV in workspace:
-run('src/Trajectory Optimization TV-LQR/MATLAB/Lab5_Export_Refs.m')
+% After tv_lqr_act1_student.m leaves N, Ts, nx, nu, x0, yf, Xref, Uref, K_TV in workspace:
+run('src/Trajectory Optimization TV-LQR/MATLAB/TV_LQR_Export_Refs.m')
 ```
 
 This writes: `time_ref.txt`, `q_ref.txt`, `dq_ref.txt`, `u_ref.txt`, `K_TV.txt` to the `references/` folder.
@@ -502,7 +502,7 @@ Both nodes run for the trajectory duration read from `time_ref.txt` (tf = N * Ts
 | `test_num` | ID appended to output CSV; use different IDs for Act. 1 and Act. 2 |
 | `torque_scale` | (optional) Scale factor on applied torque, useful for a progressive HW ramp-up |
 
-Data saved to: `data/lab5/sim/data_log_sim_lab5_<N>.csv` and `data/lab5/real/data_log_real_lab5_<N>.csv`
+Data saved to: `data/tv_lqr/sim/data_log_sim_tv_lqr_<N>.csv` and `data/tv_lqr/real/data_log_real_tv_lqr_<N>.csv`
 
 **Step 5 — MATLAB analysis**
 
@@ -510,12 +510,12 @@ Data saved to: `data/lab5/sim/data_log_sim_lab5_<N>.csv` and `data/lab5/real/dat
 % Individual run (sim or real):
 mode     = 'sim';   % 'sim' or 'real'
 test_num = 1;
-run('src/Trajectory Optimization TV-LQR/MATLAB/Lab5_Plot_SimReal.m')
+run('src/Trajectory Optimization TV-LQR/MATLAB/TV_LQR_Plot_SimReal.m')
 
 % Side-by-side comparison:
 test_num_sim  = 1;
 test_num_real = 1;
-run('src/Trajectory Optimization TV-LQR/MATLAB/Lab5_Compare_Sim_Real.m')
+run('src/Trajectory Optimization TV-LQR/MATLAB/TV_LQR_Compare_Sim_Real.m')
 ```
 
 ---
@@ -549,7 +549,7 @@ ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student \
 | `test_num` | ID appended to output CSV |
 | `t_run` | Simulation duration in seconds |
 
-Data saved to: `data/lab6/sim/act1/gz_smc_joint_<rho>_<N>.csv`
+Data saved to: `data/smc/sim/act1/gz_smc_joint_<rho>_<N>.csv`
 
 **MATLAB post-processing:**
 
@@ -587,7 +587,7 @@ ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student \
     --ros-args -p rho_func:=sat -p phi:=0.25 -p test_num:=2 -p t_run:=20.0
 ```
 
-Data saved to: `data/lab6/sim/act2/gz_smc_cart_<rho>_<N>.csv`
+Data saved to: `data/smc/sim/act2/gz_smc_cart_<rho>_<N>.csv`
 
 **MATLAB post-processing:**
 
@@ -641,14 +641,14 @@ All experiment data is saved as CSV files under `data/`. Each controller writes 
 
 | Folder | Contents |
 |---|---|
-| `data/lab4/sim/act1/` | Feedback Linearization — joint space, simulation |
-| `data/lab4/sim/act2/` | IO Linearization — Cartesian, simulation |
-| `data/lab4/real/act1/` | Feedback Linearization — joint space, real HW |
-| `data/lab4/real/act2/` | IO Linearization — Cartesian, real HW |
-| `data/lab5/sim/` | TV-LQR — simulation |
-| `data/lab5/real/` | TV-LQR — real HW |
-| `data/lab6/sim/act1/` | SMC joint space — simulation |
-| `data/lab6/sim/act2/` | SMC Cartesian — simulation |
+| `data/feedback_linearization/sim/act1/` | Feedback Linearization — joint space, simulation |
+| `data/feedback_linearization/sim/act2/` | IO Linearization — Cartesian, simulation |
+| `data/feedback_linearization/real/act1/` | Feedback Linearization — joint space, real HW |
+| `data/feedback_linearization/real/act2/` | IO Linearization — Cartesian, real HW |
+| `data/tv_lqr/sim/` | TV-LQR — simulation |
+| `data/tv_lqr/real/` | TV-LQR — real HW |
+| `data/smc/sim/act1/` | SMC joint space — simulation |
+| `data/smc/sim/act2/` | SMC Cartesian — simulation |
 | `data/gravity_comp/` | Gravity compensation experiments |
 | `data/identification/` | Motor dynamics identification |
 | `data/diagnostics/` | Low-level sinusoidal torque diagnostics |

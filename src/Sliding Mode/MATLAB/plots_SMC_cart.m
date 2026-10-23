@@ -1,6 +1,6 @@
 %% plots_SMC_cart.m
 % Graficas para Actividad 2 — Control por Modo Deslizante en espacio cartesiano
-% OpenMANIPULATOR-X, Laboratorio 6
+% OpenMANIPULATOR-X, Sliding Mode Control
 %
 %   Figura 1 — Seguimiento cartesiano: x, y, z, phi  vs referencia
 %   Figura 2 — Errores de seguimiento cartesiano e_x, e_y, e_z, e_phi
@@ -52,15 +52,15 @@ end
 
 switch mode
     case 'sim'
-        csv_file   = fullfile(pkg_dir, 'data', 'lab6', 'sim', 'act2', ...
+        csv_file   = fullfile(pkg_dir, 'data', 'smc', 'sim', 'act2', ...
                               sprintf('gz_%s_cart_%s_%d.csv', controller, rho_func, test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'sim', 'act2', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim', 'act2', ...
                               sprintf('test%d_%s%s', test_num, rho_func, ctrl_suffix));
         mode_label = 'Simulacion';
     case 'real'
-        csv_file   = fullfile(pkg_dir, 'data', 'lab6', 'real', 'act2', ...
+        csv_file   = fullfile(pkg_dir, 'data', 'smc', 'real', 'act2', ...
                               sprintf('hw_%s_cart_%s_%d.csv', controller, rho_func, test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'real', 'act2', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act2', ...
                               sprintf('test%d_%s%s', test_num, rho_func, ctrl_suffix));
         mode_label = 'Implementacion';
     otherwise

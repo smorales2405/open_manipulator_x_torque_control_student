@@ -1,7 +1,7 @@
-%% Lab5_Export_Refs.m
+%% TV_LQR_Export_Refs.m
 % Exporta las referencias TV-LQR a archivos .txt para los nodos ROS 2.
 %
-% PREREQUISITO: ejecutar lab5_act*_sol.m primero.
+% PREREQUISITO: ejecutar tv_lqr_act*_sol.m primero.
 % Las siguientes variables deben existir en el workspace:
 %   N, Ts, nx, nu        — parametros del problema
 %   x0, yf               — condiciones de frontera
@@ -39,8 +39,8 @@ for i = 1:numel(required)
     end
 end
 if ~isempty(missing)
-    error(['Lab5_Export_Refs: variables no encontradas en el workspace: %s\n' ...
-           'Ejecutar lab5_act2_sol.m (o lab5_act1_sol.m) primero.'], ...
+    error(['TV_LQR_Export_Refs: variables no encontradas en el workspace: %s\n' ...
+           'Ejecutar tv_lqr_act2_sol.m (o tv_lqr_act1_sol.m) primero.'], ...
           strjoin(missing, ', '));
 end
 fprintf('Workspace OK: N=%d  Ts=%.4f s  (tiempo total: %.2f s)  — Actividad %d\n', ...
@@ -120,7 +120,7 @@ end
 %  6. Resumen
 %  ========================================================================
 fprintf('\n======================================================\n');
-fprintf('Lab5_Export_Refs — Resumen de exportacion\n');
+fprintf('TV_LQR_Export_Refs — Resumen de exportacion\n');
 fprintf('======================================================\n');
 fprintf('  Actividad             : %d\n',   act_num);
 fprintf('  N                     : %d\n',   N);

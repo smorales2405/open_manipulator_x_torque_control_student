@@ -1,6 +1,6 @@
 La%% plots_SMC_comp_cart.m
 % Graficas COMPARATIVAS — Control SMC Cartesiano (sign vs sat)
-% OpenMANIPULATOR-X, Laboratorio 6 — Actividad 2
+% OpenMANIPULATOR-X, Sliding Mode Control — Actividad 2
 %
 %   Figura 1 — Seguimiento cartesiano: x, y, z, phi  vs referencia
 %   Figura 2 — Errores de seguimiento cartesiano e_x, e_y, e_z, e_phi
@@ -30,13 +30,13 @@ pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   %
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
 switch mode
     case 'sim'
-        data_dir   = fullfile(pkg_dir, 'data',  'lab6', 'sim',  'act2');
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'sim',  'act2', 'comp_sf');
+        data_dir   = fullfile(pkg_dir, 'data',  'smc', 'sim',  'act2');
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim',  'act2', 'comp_sf');
         mode_label = 'Simulacion';
         prefix     = 'gz_smc_cart';
     case 'real'
-        data_dir   = fullfile(pkg_dir, 'data',  'lab6', 'real', 'act2');
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'real', 'act2', 'comp_sf');
+        data_dir   = fullfile(pkg_dir, 'data',  'smc', 'real', 'act2');
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act2', 'comp_sf');
         mode_label = 'Implementacion';
         prefix     = 'hw_smc_cart';
     otherwise

@@ -1,9 +1,9 @@
 // ============================================================================
 //  gz_SMC_joint_node_student.cpp
 //  Control por Modo Deslizante en espacio articular — OpenMANIPULATOR-X (Gazebo)
-//  [Archivo base para estudiantes — Lab 6, Actividad 1]
+//  [Archivo base para estudiantes — SMC, Actividad 1]
 //
-//  Modelo dinamico nominal (Guia Lab 6, Sec. 6.1):
+//  Modelo dinamico nominal (Guia SMC, Sec. 6.1):
 //    M(q)*ddq + Phi(q,dq) = tau - tau_fric
 //    tau_fric = Fv·dq + Fc·tanh(dq_d/eps)    (feedforward de friccion del URDF)
 //      Fv, Fc : <dynamics damping/friction> de joint1..4, leidos del modelo
@@ -34,7 +34,7 @@
 //    rho_func  [string]  "sign"  — funcion de conmutacion: "sign" | "sat"
 //    phi       [double]  0.15    — capa limite para sat(s/phi)  [rad/s]
 //
-//  CSV generado: data/lab6/sim/act1/gz_smc_joint_<rho_func>_<test_num>.csv
+//  CSV generado: data/smc/sim/act1/gz_smc_joint_<rho_func>_<test_num>.csv
 //  Columnas: t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des,
 //            s1..s4, tau1..tau4
 //  (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max.)
@@ -284,7 +284,7 @@ private:
   // ── CSV ───────────────────────────────────────────────────────────────────
   void open_csv(int test_num)
   {
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab6/sim/act1/gz_smc_joint_"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/smc/sim/act1/gz_smc_joint_"
                 + rho_str_ + "_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,"

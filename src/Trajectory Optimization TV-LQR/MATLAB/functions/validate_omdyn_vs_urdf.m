@@ -77,15 +77,15 @@ DQ_rand = -5 + 10*rand(4, n_rand);  % [-5, 5] rad/s
 
 % Incluir configuraciones especiales al inicio
 q_home  = [0; 0; 0; 0];
-q_lab5  = [pi/2; 0; pi/6; pi/3];  % x0 Lab 5 Act. 1
+q_tvlqr = [pi/2; 0; pi/6; pi/3];  % x0 TV-LQR Act. 1
 dq_zero = zeros(4,1);
 
-Q_test  = [q_home, q_lab5, Q_rand];
+Q_test  = [q_home, q_tvlqr, Q_rand];
 DQ_test = [dq_zero, dq_zero, DQ_rand];
 n_test  = size(Q_test, 2);
 
-test_labels = ['Home', 'Lab5-x0', arrayfun(@(k) sprintf('Rand%d',k), 1:n_rand, 'UniformOutput', false)];
-test_labels = [{'Home','Lab5-x0'}, arrayfun(@(k) sprintf('Rand%d',k), 1:n_rand, 'UniformOutput', false)];
+test_labels = ['Home', 'TV-LQR-x0', arrayfun(@(k) sprintf('Rand%d',k), 1:n_rand, 'UniformOutput', false)];
+test_labels = [{'Home','TV-LQR-x0'}, arrayfun(@(k) sprintf('Rand%d',k), 1:n_rand, 'UniformOutput', false)];
 
 %% ========================================================================
 %  3. Bucle de validacion
@@ -225,14 +225,14 @@ grid on; box on;
 
 sgtitle('Validacion OMDyn.m vs openmani.urdf', 'FontSize', fs+3, 'FontWeight', 'bold');
 
-%% Figura 2: comparacion elemento a elemento de M para test Lab5-x0
+%% Figura 2: comparacion elemento a elemento de M para test TV-LQR-x0
 
-k_ref   = 2;   % indice del test Lab5-x0
+k_ref   = 2;   % indice del test TV-LQR-x0
 M_om_r  = M_omdyn_all(:,:,k_ref);
 M_ur_r  = M_urdf_all(:,:,k_ref);
 
 figure(2); clf;
-set(gcf, 'Name', 'Comparacion M(q) — Lab5-x0', 'Color', 'w', ...
+set(gcf, 'Name', 'Comparacion M(q) — TV-LQR-x0', 'Color', 'w', ...
     'Position', [100 120 1000 700]);
 
 tl = tiledlayout(4, 4, 'TileSpacing', 'compact', 'Padding', 'compact');

@@ -1,6 +1,6 @@
 %% plots_IO_control.m
 % Graficas para Actividad 2 — Control IO (Input-Output Linearization)
-% OpenMANIPULATOR-X, Laboratorio 4
+% OpenMANIPULATOR-X, Feedback Linearization
 %
 %   Figura 1 — Seguimiento cartesiano: x, y, z, phi  vs referencia
 %   Figura 2 — Errores de seguimiento cartesiano e_x, e_y, e_z, e_phi
@@ -38,15 +38,15 @@ pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   %
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
 switch mode
     case 'sim'
-        csvFile    = fullfile(pkg_dir, 'data', 'lab4', 'sim', 'act2', ...
+        csvFile    = fullfile(pkg_dir, 'data', 'feedback_linearization', 'sim', 'act2', ...
                               sprintf('gz_io_data_%d.csv', test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab4', 'sim', 'act2', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'feedback_linearization', 'sim', 'act2', ...
                               sprintf('test%d', test_num));
         mode_label = 'Simulacion';
     case 'real'
-        csvFile    = fullfile(pkg_dir, 'data', 'lab4', 'real', 'act2', ...
+        csvFile    = fullfile(pkg_dir, 'data', 'feedback_linearization', 'real', 'act2', ...
                               sprintf('hw_io_data_%d.csv', test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab4', 'real', 'act2', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'feedback_linearization', 'real', 'act2', ...
                               sprintf('test%d', test_num));
         mode_label = 'Implementacion';
     otherwise

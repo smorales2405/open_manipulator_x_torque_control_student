@@ -219,7 +219,7 @@ private:
   // ── CSV ───────────────────────────────────────────────────────────────────
   void open_csv(int test_num)
   {
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab4/sim/act2/gz_io_data_"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/feedback_linearization/sim/act2/gz_io_data_"
                 + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,"

@@ -15,7 +15,7 @@
 %  Las graficas usan la FK simbolica exacta (sin truncamiento de Fourier).
 %
 %  Requiere: open_manx_fkin.m en el mismo directorio o en el MATLAB path.
-%  OpenManipulator-X — Lab 6 SMC
+%  OpenManipulator-X — SMC
 % ============================================================================
 
 clear; clc; close all;

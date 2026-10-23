@@ -2,7 +2,7 @@
  * hw_SMC_cart_node_student.cpp
  * Control por Modo Deslizante en espacio cartesiano — OpenMANIPULATOR-X
  * hardware real vía Dynamixel SDK directo, sin ros2_control.
- * [Archivo base para estudiantes — Lab 6, implementacion]
+ * [Archivo base para estudiantes — SMC, implementacion]
  *
  * Soporta DOS leyes de control, seleccionables con el parametro booleano
  * use_integral (default: false):
@@ -57,7 +57,7 @@
  *   "sat"  -> rho(s) = sat(s/phi)     phi: capa limite [m/s o rad/s]
  *
  * Trayectoria cartesiana de referencia (serie de Fourier w=1.0 rad/s,
- * identica a gz_SMC_cart_node; FK de la trayectoria articular del Lab 6):
+ * identica a gz_SMC_cart_node; FK de la trayectoria articular del SMC):
  *   x_d   = 0.172 + 0.032*sin(t') + 0.027*cos(2t') + 0.003*sin(3t')
  *   y_d   = 0.015 + 0.136*sin(t') - 0.014*cos(2t') + 0.003*sin(3t') - 0.001*cos(4t')
  *   z_d   = 0.128 - 0.008*sin(t') + 0.006*cos(2t')      [z ∈ 0.114..0.142 m]
@@ -123,8 +123,8 @@
  * motor_I_offset, motor_epsilon_friction, joint_zero_tick, encoder_sign,
  * current_sign, joint_lower/upper, current_*_limit, tau_max.
  *
- * CSV: data/lab6/real/act2/hw_smc_cart_<rho_func>_<test_num>.csv   (SMC)
- *      data/lab6/real/act2/hw_smci_cart_<rho_func>_<test_num>.csv  (ISMC)
+ * CSV: data/smc/real/act2/hw_smc_cart_<rho_func>_<test_num>.csv   (SMC)
+ *      data/smc/real/act2/hw_smci_cart_<rho_func>_<test_num>.csv  (ISMC)
  * Columnas (compatibles con plots_SMC_cart.m, mode='real',
  * controller='smc'|'smci' segun use_integral):
  *   t, q1..q4, x,y,z,phi, x_des..phi_des, xdot..phidot, xdot_des..phidot_des,
@@ -478,7 +478,7 @@ public:
 
     // ── CSV (prefijo segun la ley activa; compatible con plots_SMC_cart.m
     //    controller='smc'|'smci') ────────────────────────────────────────────
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab6/real/act2/"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/smc/real/act2/"
                 + (use_integral_ ? "hw_smci_cart_" : "hw_smc_cart_")
                 + rho_str_ + "_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,

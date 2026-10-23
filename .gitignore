@@ -15,10 +15,10 @@ config/motorXM430W350T_params_posmode.yaml
 # Bytecode de Python (launch files)
 __pycache__/
 
-# Salidas de ejecucion de MATLAB (Lab 5): logs de fmincon y soluciones .mat
+# Salidas de ejecucion de MATLAB (TV-LQR): logs de fmincon y soluciones .mat
 src/Trajectory Optimization TV-LQR/MATLAB/logs/
 src/Trajectory Optimization TV-LQR/MATLAB/zmin/
-# El PreLab 5 guarda su solucion junto al script (carpeta portable) y exporta
+# El PreLab TV-LQR guarda su solucion junto al script (carpeta portable) y exporta
 # las figuras a plots/ ahi mismo: ambas son salidas regenerables
 src/Trajectory Optimization TV-LQR/MATLAB/Prelab/**/zmin.mat
 src/Trajectory Optimization TV-LQR/MATLAB/Prelab/**/plots/
@@ -38,7 +38,7 @@ codegen/
 !src/Feedback Linearization/MATLAB/Prelab/student/OMDyn.mexa64
 !src/Feedback Linearization/MATLAB/Prelab/student/OMDyn.mexw64
 
-# Excepcion: los MEX Linux del Lab 5 (TV-LQR) SI se versionan — los scripts
+# Excepcion: los MEX Linux del TV-LQR SI se versionan — los scripts
 # de instructor y las plantillas de estudiante asumen OMDyn.mexa64 y
 # open_manx_fkin.mexa64 precompilados en su misma carpeta (solo Linux;
 # en Windows recompilar con MATLAB Coder). codegen/ sigue ignorado.
@@ -47,7 +47,7 @@ codegen/
 !src/Trajectory Optimization TV-LQR/MATLAB/student/OMDyn.mexa64
 !src/Trajectory Optimization TV-LQR/MATLAB/student/open_manx_fkin.mexa64
 
-# Excepcion: el PreLab 5 tambien es una carpeta portable autocontenida
+# Excepcion: el PreLab TV-LQR tambien es una carpeta portable autocontenida
 # (solo binarios; open_manx_fkin va como funcion local del script)
 !src/Trajectory Optimization TV-LQR/MATLAB/Prelab/instructor/OMDyn.mexa64
 !src/Trajectory Optimization TV-LQR/MATLAB/Prelab/instructor/OMDyn.mexw64

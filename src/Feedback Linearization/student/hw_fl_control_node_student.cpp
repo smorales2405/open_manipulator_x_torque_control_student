@@ -216,7 +216,7 @@ public:
     RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d", model_.nv());
 
     // ── CSV ──────────────────────────────────────────────────────────────────
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab4/real/act1/hw_fl_data_"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/feedback_linearization/real/act1/hw_fl_data_"
                 + std::to_string(log_id) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,q1,q2,q3,q4,dq1,dq2,dq3,dq4,dq1_filt,dq2_filt,dq3_filt,dq4_filt,"

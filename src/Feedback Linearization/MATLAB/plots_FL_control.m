@@ -1,6 +1,6 @@
 %% plots_FL_control.m
 % Graficas para Actividad 1 — Control FL (Feedback Linearization)
-% OpenMANIPULATOR-X, Laboratorio 4
+% OpenMANIPULATOR-X, Feedback Linearization
 %
 %   Figura 1 — Seguimiento de posiciones articulares  q1..q4
 %   Figura 2 — Errores de seguimiento articular e_q1..e_q4
@@ -41,15 +41,15 @@ pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   %
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
 switch mode
     case 'sim'
-        csvFile    = fullfile(pkg_dir, 'data', 'lab4', 'sim', 'act1', ...
+        csvFile    = fullfile(pkg_dir, 'data', 'feedback_linearization', 'sim', 'act1', ...
                               sprintf('gz_fl_data_%d.csv', test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab4', 'sim', 'act1', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'feedback_linearization', 'sim', 'act1', ...
                               sprintf('test%d', test_num));
         mode_label = 'Simulacion';
     case 'real'
-        csvFile    = fullfile(pkg_dir, 'data', 'lab4', 'real', 'act1', ...
+        csvFile    = fullfile(pkg_dir, 'data', 'feedback_linearization', 'real', 'act1', ...
                               sprintf('hw_fl_data_%d.csv', test_num));
-        output_dir = fullfile(pkg_dir, 'plots', 'lab4', 'real', 'act1', ...
+        output_dir = fullfile(pkg_dir, 'plots', 'feedback_linearization', 'real', 'act1', ...
                               sprintf('test%d', test_num));
         mode_label = 'Implementacion';
     otherwise

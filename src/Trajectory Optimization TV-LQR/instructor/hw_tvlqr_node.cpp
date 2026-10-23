@@ -16,11 +16,11 @@
  *     habilita el lazo a 200 Hz (read_state)
  *   - Filtro α-β sobre la posicion medida: estima dq_hat sin la cuantizacion
  *     ni el retardo del registro de velocidad Dynamixel (defaults validados
- *     en el Lab 4: α=0.2, β=0.02 @ 200 Hz)
+ *     en el FL: α=0.2, β=0.02 @ 200 Hz)
  *   - Escritura de corriente SyncWrite (send_currents)
  *   - Conversion torque -> corriente via modelo OLS identificado (motor_params.yaml);
  *     la compensacion de Coulomb usa la velocidad DESEADA dq_ref (leccion del
- *     Lab 4: sin chattering por ruido de dq y empuje de despegue al arrancar)
+ *     FL: sin chattering por ruido de dq y empuje de despegue al arrancar)
  *   - Verificacion de corriente medida (parada de emergencia)
  *   - Deteccion de overrun del lazo
  *   - Publicador /hw/joint_states para monitoreo
@@ -54,7 +54,7 @@
  * ADVERTENCIA: No ejecutar junto a hardware.launch.py ni ningun proceso
  * que acceda al puerto USB (ros2_control_node, dynamixel_hardware_interface).
  *
- * CSV generado: data/lab5/real/act<act_num>/data_log_real_lab5_<test_num>.csv
+ * CSV generado: data/tv_lqr/real/act<act_num>/data_log_real_tv_lqr_<test_num>.csv
  * (incluye u_ref del instante k — el post-procesado no necesita references/)
  */
 
@@ -235,9 +235,9 @@ public:
       "Referencias cargadas: N=%d  Ts=%.3f s  (duracion: %.2f s)", N_, Ts_, t_end_);
 
     // ── CSV ──────────────────────────────────────────────────────────────────
-    const std::string data_dir = std::string(PACKAGE_DATA_DIR) + "/lab5/real/act"
+    const std::string data_dir = std::string(PACKAGE_DATA_DIR) + "/tv_lqr/real/act"
                                  + std::to_string(act_num);
-    csv_path_ = data_dir + "/data_log_real_lab5_" + std::to_string(test_num) + ".csv";
+    csv_path_ = data_dir + "/data_log_real_tv_lqr_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,q1,q2,q3,q4,dq1,dq2,dq3,dq4,dq1_filt,dq2_filt,dq3_filt,dq4_filt,"
       "q1_ref,q2_ref,q3_ref,q4_ref,dq1_ref,dq2_ref,dq3_ref,dq4_ref,"
@@ -318,7 +318,7 @@ private:
     //   residuo:    r      = q_meas - q_pred
     //   correccion: q_hat  = q_pred + α·r,        dq_hat = dq_pred + (β/Ts)·r
     //   dq_hat evita la cuantizacion (~0.024 rad/s) y el retardo del registro
-    //   de velocidad Dynamixel (defaults validados en el Lab 4).
+    //   de velocidad Dynamixel (defaults validados en el FL).
     if (!ab_initialized_) {
       q_hat_          = q;
       dq_hat_         = dq;

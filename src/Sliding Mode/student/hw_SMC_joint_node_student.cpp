@@ -2,7 +2,7 @@
  * hw_SMC_joint_node_student.cpp
  * Control por Modo Deslizante en espacio articular — OpenMANIPULATOR-X
  * hardware real vía Dynamixel SDK directo, sin ros2_control.
- * [Archivo base para estudiantes — Lab 6, implementacion]
+ * [Archivo base para estudiantes — SMC, implementacion]
  *
  * ──────────────────────────────────────────────────────────────────────────
  * SECCIONES A COMPLETAR:
@@ -72,7 +72,7 @@
  * motor_I_offset, motor_epsilon_friction, joint_zero_tick, encoder_sign,
  * current_sign, joint_lower/upper, current_*_limit, tau_max.
  *
- * CSV: data/lab6/real/act1/hw_smc_joint_<rho_func>_<test_num>.csv
+ * CSV: data/smc/real/act1/hw_smc_joint_<rho_func>_<test_num>.csv
  * Columnas (compatibles con plots_SMC_joint.m, mode='real'):
  *   t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des, s1..s4,
  *   tau1..tau4, dq1_filt..dq4_filt, curr_cmd1..4, curr_meas1..4
@@ -325,7 +325,7 @@ public:
     RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d", model_.nv());
 
     // ── CSV ──────────────────────────────────────────────────────────────────
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/lab6/real/act1/hw_smc_joint_"
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/smc/real/act1/hw_smc_joint_"
                 + rho_str_ + "_" + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,q1,q2,q3,q4,dq1,dq2,dq3,dq4,"
@@ -389,7 +389,7 @@ private:
     //    LAMBDA_Q, k_v, k_s     — ganancias (k_v, k_s ya escaladas)
     //    rho_vec(s, rho_func_, phi_) — funcion de conmutacion vectorial
     //
-    //  Ley (guia Lab 6; en hardware SIN tau_fric del URDF — la friccion
+    //  Ley (guia SMC; en hardware SIN tau_fric del URDF — la friccion
     //  real se compensa en torque_to_current con el modelo del motor):
     //    e_q  = q - q_d          e_dq = dq - dq_d
     //    s_q  = e_dq + Lambda_q .* e_q          (asignar a s_out)

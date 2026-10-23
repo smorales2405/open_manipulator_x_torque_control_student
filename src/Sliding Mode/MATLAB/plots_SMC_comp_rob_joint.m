@@ -1,6 +1,6 @@
 %% plots_SMC_comp_rob_joint.m
 % Graficas COMPARATIVAS de ROBUSTEZ — Control SMC Articular
-% OpenMANIPULATOR-X, Laboratorio 6 — Actividad 1
+% OpenMANIPULATOR-X, Sliding Mode Control — Actividad 1
 %
 %   Compara dos ensayos: caso nominal vs caso con perturbacion
 %     robustness_test = 'params'  -> con y sin incertidumbre parametrica
@@ -53,13 +53,13 @@ end
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
 switch mode
     case 'sim'
-        data_dir   = fullfile(pkg_dir, 'data',  'lab6', 'sim',  'act1');
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'sim',  'act1', 'comp_rob');
+        data_dir   = fullfile(pkg_dir, 'data',  'smc', 'sim',  'act1');
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim',  'act1', 'comp_rob');
         mode_label = 'Simulacion';
         prefix     = 'gz_smc_joint';
     case 'real'
-        data_dir   = fullfile(pkg_dir, 'data',  'lab6', 'real', 'act1');
-        output_dir = fullfile(pkg_dir, 'plots', 'lab6', 'real', 'act1', 'comp_rob');
+        data_dir   = fullfile(pkg_dir, 'data',  'smc', 'real', 'act1');
+        output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act1', 'comp_rob');
         mode_label = 'Implementacion';
         prefix     = 'hw_smc_art';
     otherwise
