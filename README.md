@@ -405,12 +405,12 @@ ros2 run open_manipulator_x_torque_control gz_fl_control_node_student \
 
 # Real hardware
 ros2 run open_manipulator_x_torque_control hw_fl_control_node_student \
-    --ros-args -p log_id:=1 -p t_run:=20.0
+    --ros-args -p test_num:=1 -p t_run:=20.0
 ```
 
 | Parameter | Description |
 |---|---|
-| `test_num` / `log_id` | Numeric ID appended to the output CSV filename |
+| `test_num` | Numeric ID appended to the output CSV filename |
 | `t_run` | Experiment duration in seconds |
 
 Data saved to: `data/feedback_linearization/sim/act1/gz_fl_data_<N>.csv` and `data/feedback_linearization/real/act1/hw_fl_data_<N>.csv`
@@ -432,7 +432,7 @@ ros2 run open_manipulator_x_torque_control gz_io_control_node_student \
 
 # Real hardware
 ros2 run open_manipulator_x_torque_control hw_io_control_node_student \
-    --ros-args -p log_id:=1 -p t_run:=20.0
+    --ros-args -p test_num:=1 -p t_run:=20.0
 ```
 
 Data saved to: `data/feedback_linearization/sim/act2/` and `data/feedback_linearization/real/act2/`
@@ -638,7 +638,7 @@ If the robot is not at `/dev/ttyUSB0`, replace `ttyUSB0` with the correct port n
 
 ## Data and Plots
 
-All experiment data is saved as CSV files under `data/`. Each controller writes one CSV per run, identified by the `test_num` (simulation) or `log_id` (hardware) parameter.
+All experiment data is saved as CSV files under `data/`. Each controller writes one CSV per run, identified by the `test_num` parameter (`log_id` in the gravity compensation, impedance and identification nodes).
 
 | Folder | Contents |
 |---|---|

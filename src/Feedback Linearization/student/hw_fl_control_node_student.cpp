@@ -34,7 +34,7 @@
  *   port_name              [string]   "/dev/ttyUSB0"
  *   gain_scale             [double]   1.0    (escala lineal de Kp; Kd escala con sqrt)
  *   t_run                  [double]   20.0   (duracion; 0 = sin limite)
- *   log_id                 [int]      1
+ *   test_num               [int]      1
  *   ab_alpha               [double]   0.2    (filtro alpha-beta: ganancia de posicion)
  *   ab_beta                [double]   0.02   (filtro alpha-beta: ganancia de velocidad)
  *   friction_fc_scale      [double]   0.95   (fraccion de Fc compensada)
@@ -49,7 +49,7 @@
  *
  * Ejemplo de ejecucion:
  *   ros2 run open_manipulator_x_torque_control hw_fl_control_node_student \
- *     --ros-args -p gain_scale:=1.0 -p log_id:=1 -p t_run:=20.0
+ *     --ros-args -p gain_scale:=1.0 -p test_num:=1 -p t_run:=20.0
  */
 
 #include <array>
@@ -170,7 +170,7 @@ public:
     this->declare_parameter<std::string>("port_name",  "/dev/ttyUSB0");
     this->declare_parameter<double>     ("gain_scale",  1.0);
     this->declare_parameter<double>     ("t_run",       20.0);
-    this->declare_parameter<int>        ("log_id",      1);
+    this->declare_parameter<int>        ("test_num",    1);
 
     this->declare_parameter<double>("ab_alpha", 0.2);
     this->declare_parameter<double>("ab_beta",  0.02);
@@ -182,7 +182,7 @@ public:
     port_name_  = this->get_parameter("port_name").as_string();
     gain_scale_ = this->get_parameter("gain_scale").as_double();
     t_run_      = this->get_parameter("t_run").as_double();
-    const int log_id = this->get_parameter("log_id").as_int();
+    const int test_num = this->get_parameter("test_num").as_int();
 
     ab_alpha_ = get_parameter("ab_alpha").as_double();
     ab_beta_  = get_parameter("ab_beta").as_double();
@@ -190,7 +190,7 @@ public:
     Ts_ = 1.0 / loop_rate_hz_;
 
     RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  dur=%.1fs  id=%d",
-      port_name_.c_str(), gain_scale_, t_run_, log_id);
+      port_name_.c_str(), gain_scale_, t_run_, test_num);
     RCLCPP_INFO(get_logger(),
       "motor alpha=[%.1f %.1f %.1f %.1f]  Fv=[%.2f %.2f %.2f %.2f]  epsilon=%.3f",
       hw_.motor.alpha(0), hw_.motor.alpha(1), hw_.motor.alpha(2), hw_.motor.alpha(3),
@@ -211,7 +211,7 @@ public:
 
     // ── CSV ──────────────────────────────────────────────────────────────────
     csv_path_ = std::string(PACKAGE_DATA_DIR) + "/feedback_linearization/real/act1/hw_fl_data_"
-                + std::to_string(log_id) + ".csv";
+                + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,q1,q2,q3,q4,dq1,dq2,dq3,dq4,dq1_filt,dq2_filt,dq3_filt,dq4_filt,"
       "q1_des,q2_des,q3_des,q4_des,dq1_des,dq2_des,dq3_des,dq4_des,"

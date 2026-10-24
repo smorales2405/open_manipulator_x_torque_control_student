@@ -411,11 +411,11 @@ referencia:
 
 ```bash
 ros2 run open_manipulator_x_torque_control hw_fl_control_node \
-  --ros-args -p gain_scale:=1.0 -p t_run:=20.0 -p log_id:=31
+  --ros-args -p gain_scale:=1.0 -p t_run:=20.0 -p test_num:=31
 ```
 
 y graficar con `src/Feedback Linearization/MATLAB/plots_FL_control.m`
-(`log_id = 31`). Referencia de un robot sano con este modelo (lazo a 200 Hz):
+(`test_num = 31`). Referencia de un robot sano con este modelo (lazo a 200 Hz):
 errores RMS articulares del orden de **0.005–0.03 rad** por
 joint tras la rampa, sin saturación de torque y sin stick-slip visible en las
 inversiones. Si hay stick-slip marcado o saturación, revise la tabla
