@@ -4,7 +4,7 @@
 
 ROS 2 Humble package for torque/effort control of the **OpenManipulator-X** (4-DOF serial robot arm by ROBOTIS). Supports Gazebo Fortress simulation and real hardware via Dynamixel SDK. Developed for the *Control de Sistemas No Lineales* laboratory course at UTEC.
 
-Implemented controllers: **Gravity Compensation**, **Feedback Linearization** (joint-space and Cartesian), **Trajectory Optimization + TV-LQR**, and **Sliding Mode Control** (joint-space and Cartesian).
+Implemented controllers: **Feedback Linearization** (joint-space and Cartesian), **Trajectory Optimization + TV-LQR**, and **Sliding Mode Control** (joint-space and Cartesian).
 
 ---
 
@@ -233,10 +233,9 @@ open_manipulator_x_torque_control/
 │   └── types.hpp                 # Vec4, Mat4, Reference, CartRef
 ├── launch/
 │   ├── torque_sim.launch.py          # Main Gazebo simulation launcher
-│   ├── gravity_comp_gz.launch.py     # Gravity compensation in simulation
 │   ├── fkin_rviz.launch.py           # Forward kinematics + RViz display
 │   └── friction_sweep.launch.py      # Constant-velocity friction sweep on real HW
-│   # (HW gravity comp y TV-LQR se corren con `ros2 run`; auto-cargan motorXM430W350T_params.yaml)
+│   # (TV-LQR se corre con `ros2 run`; auto-carga motorXM430W350T_params.yaml)
 ├── src/
 │   ├── Common/                   # omx_common sources (the only unit that compiles Pinocchio)
 │   ├── Feedback Linearization/
@@ -250,8 +249,6 @@ open_manipulator_x_torque_control/
 │   │   ├── references/               # Exported trajectory files from MATLAB
 │   │   └── MATLAB/                   # Trajectory generation and analysis scripts
 │   ├── Model Reference Adaptive Control/  # 12-parameter joint MRAC (sim and HW)
-│   ├── Gravity Compensation/         # Gravity compensation nodes (sim and HW)
-│   ├── Impedance/                    # Joint impedance control on real HW
 │   ├── Forward Kinematics/           # HW FK node and RViz display node
 │   ├── Identification/               # Torque→current model ID (excitation node + Python OLS/friction)
 │   └── Diagnostics/                  # Low-level torque diagnostic nodes
@@ -267,7 +264,6 @@ open_manipulator_x_torque_control/
 │   ├── feedback_linearization/  sim/  real/  # Feedback Linearization experiment data
 │   ├── tv_lqr/  sim/  real/          # TV-LQR experiment data
 │   ├── smc/  sim/                    # Sliding Mode experiment data
-│   ├── gravity_comp/                 # Gravity compensation data
 │   ├── identification/               # Motor identification data
 │   └── diagnostics/                  # Diagnostic torque data
 └── scripts/
@@ -638,7 +634,7 @@ If the robot is not at `/dev/ttyUSB0`, replace `ttyUSB0` with the correct port n
 
 ## Data and Plots
 
-All experiment data is saved as CSV files under `data/`. Each controller writes one CSV per run, identified by the `test_num` parameter (`log_id` in the gravity compensation, impedance and identification nodes).
+All experiment data is saved as CSV files under `data/`. Each controller writes one CSV per run, identified by the `test_num` parameter (`log_id` in the identification nodes).
 
 | Folder | Contents |
 |---|---|
@@ -650,7 +646,6 @@ All experiment data is saved as CSV files under `data/`. Each controller writes 
 | `data/tv_lqr/real/` | TV-LQR — real HW |
 | `data/smc/sim/act1/` | SMC joint space — simulation |
 | `data/smc/sim/act2/` | SMC Cartesian — simulation |
-| `data/gravity_comp/` | Gravity compensation experiments |
 | `data/identification/` | Motor dynamics identification |
 | `data/diagnostics/` | Low-level sinusoidal torque diagnostics |
 

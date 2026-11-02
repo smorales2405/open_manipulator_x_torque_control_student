@@ -19,7 +19,8 @@ find_package(dynamixel_sdk REQUIRED)
 # Las carpetas instructor/ (salvo la de TV-LQR) no existen en el repo de
 # estudiantes (open_manipulator_x_torque_control_student): sus targets van
 # dentro de if(EXISTS ...) y se omiten solos. Todo nodo de instructor nuevo
-# debe ir dentro de uno de esos bloques.
+# debe ir dentro de uno de esos bloques. Lo mismo vale para Gravity Compensation
+# e Impedance, que tampoco se publican.
 set(FL_INSTR   "src/Feedback Linearization/instructor")
 set(FL_STUD    "src/Feedback Linearization/student")
 set(TO_INSTR   "src/Trajectory Optimization TV-LQR/instructor")
@@ -126,6 +127,7 @@ target_compile_definitions(hw_io_control_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\"")
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${GC_SRC}")  # no se publica a estudiantes
 # ── gz_gravity_comp_node ─────────────────────────────────────────────────────
 add_executable(gz_gravity_comp_node "${GC_SRC}/gz_gravity_comp_node.cpp")
 ament_target_dependencies(gz_gravity_comp_node rclcpp std_msgs sensor_msgs)
@@ -144,6 +146,9 @@ target_compile_definitions(hw_gravity_comp_node PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\"")
 
+endif()  # GC_SRC
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${IMP_SRC}")  # no se publica a estudiantes
 # ── hw_impedance_control_node ────────────────────────────────────────────────
 add_executable(hw_impedance_control_node "${IMP_SRC}/hw_impedance_control_node.cpp")
 ament_target_dependencies(hw_impedance_control_node rclcpp sensor_msgs)
@@ -152,6 +157,8 @@ target_compile_features(hw_impedance_control_node PUBLIC cxx_std_17)
 target_compile_definitions(hw_impedance_control_node PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\"")
+
+endif()  # IMP_SRC
 
 # ── gz_tvlqr_node ────────────────────────────────────────────────────────────
 add_executable(gz_tvlqr_node "${TO_INSTR}/gz_tvlqr_node.cpp")
@@ -351,7 +358,7 @@ install(PROGRAMS
 
 # ── Install ──────────────────────────────────────────────────────────────────
 # Se instalan solo los targets definidos (en el repo de estudiantes no existen
-# los nodos de instructor)
+# los nodos de instructor, de Gravity Compensation ni de Impedance)
 set(OMX_NODES
     gz_fl_control_node gz_io_control_node
     hw_fl_control_node hw_io_control_node
