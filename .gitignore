@@ -38,6 +38,12 @@ codegen/
 !src/Feedback Linearization/MATLAB/Prelab/student/OMDyn.mexa64
 !src/Feedback Linearization/MATLAB/Prelab/student/OMDyn.mexw64
 
+# Excepcion: el Prelab SMC tambien es una carpeta portable autocontenida
+!src/Sliding Mode/MATLAB/Prelab/instructor/OMDyn.mexa64
+!src/Sliding Mode/MATLAB/Prelab/instructor/OMDyn.mexw64
+!src/Sliding Mode/MATLAB/Prelab/student/OMDyn.mexa64
+!src/Sliding Mode/MATLAB/Prelab/student/OMDyn.mexw64
+
 # Excepcion: los MEX Linux del TV-LQR SI se versionan — los scripts
 # de instructor y las plantillas de estudiante asumen OMDyn.mexa64 y
 # open_manx_fkin.mexa64 precompilados en su misma carpeta (solo Linux;
