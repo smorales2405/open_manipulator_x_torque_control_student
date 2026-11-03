@@ -12,9 +12,17 @@
 //      El Coulomb usa la velocidad DESEADA dq_d (senal limpia): con dq medida
 //      el tanh conmutaria con el ruido cerca de velocidad cero.
 //
+//  Termino integral de la ley de alcance (parametro integral):
+//    dz/dt = K_I*s,   |z_i| <= Z_MAX_i,   z(0) = 0
+//    integral:=false -> z = 0 (SMC clasico)
+//    integral:=true  -> z integra desde la transicion inicial y se congela
+//                       mientras el torque satura.
+//    La actualizacion de z_ y el anti-windup ya estan implementados: en la ley
+//    solo se resta z_ (ver SECCION de la ley de control).
+//
 //  Funciones de conmutacion (aplicadas elemento a elemento):
-//    "sign"  ->  rho(s) = sign(s)
 //    "sat"   ->  rho(s) = sat(s / phi)        phi: capa limite [rad/s]
+//    "sign"  ->  rho(s) = sign(s)
 //
 //  Transicion inicial: quintica generalizada de duracion T_TRANS desde la
 //  pose medida al arrancar (el brazo cae por gravedad entre el spawn de
@@ -22,7 +30,8 @@
 //  Y aceleracion con la trayectoria (empalme C2). El CSV registra solo la
 //  fase de seguimiento.
 //
-//  Lazo de control: 200 Hz (Ts = 5 ms).
+//  Lazo de control: 200 Hz de tiempo simulado (Ts = 5 ms). El nodo usa el reloj
+//  de Gazebo (use_sim_time=true): t_run y el CSV quedan en segundos simulados.
 //
 //  Suscriptor : /joint_states                   (sensor_msgs/JointState)
 //  Publicador : /arm_effort_controller/commands  (std_msgs/Float64MultiArray)
@@ -30,30 +39,35 @@
 //  Parametros ROS 2 (--ros-args -p nombre:=valor):
 //    test_num  [int]     1       — identificador del CSV generado
 //    t_run     [double]  0.0     — duracion del seguimiento en segundos
-//                                  (0 = ilimitado); total = T_TRANS + t_run
-//    rho_func  [string]  "sign"  — funcion de conmutacion: "sign" | "sat"
-//    phi       [double]  0.15    — capa limite para sat(s/phi)  [rad/s]
+//                                  (0 = ilimitado); total = T_TRANS + t_run.
+//                                  Al terminar, el nodo se cierra solo.
+//    rho_func  [string]  "sat"   — funcion de conmutacion: "sat" | "sign"
+//    phi       [double]  0.6     — capa limite para sat(s/phi)  [rad/s]
+//    integral  [bool]    false   — activa el termino integral z
 //
 //  CSV generado: data/smc/sim/act1/gz_smc_joint_<rho_func>_<test_num>.csv
 //  Columnas: t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des,
-//            s1..s4, tau1..tau4
-//  (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max.)
+//            s1..s4, tau1..tau4, z1..z4
+//  (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max. El
+//  nombre no distingue integral: usar un test_num distinto para cada ensayo.)
 //
-//  Nota: usar sim_init_config.yaml con use_fixed_init: true,
-//        q_init: [0.0, -0.45, 0.35, 0.785] (= q_d(0)) y escalas nominales
-//        mass_inertia/damping/friction = 1.0.
+//  Nota: usar sim_init_config.yaml con use_fixed_init: true y escalas nominales
+//        mass_inertia/damping/friction = 1.0 (la friccion del feedforward debe
+//        coincidir con la de la planta: friction_scale 0.0 NO es valido aqui).
 //
 //  Ejemplos de uso:
 //
-//    ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
+//    ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student --ros-args -p test_num:=1 -p t_run:=25.0
 //
-//    ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student --ros-args -p rho_func:=sat -p phi:=0.15 -p test_num:=2 -p t_run:=20.0
+//    ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student --ros-args -p rho_func:=sign -p test_num:=2 -p t_run:=25.0
+//
+//    ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student --ros-args -p integral:=true -p test_num:=3 -p t_run:=25.0
 //
 //  ──────────────────────────────────────────────────────────────────────────
 //  SECCIONES A COMPLETAR:
 //    [1] Trayectoria articular de referencia  →  desiredTrajectory()
 //    [2] Funciones de conmutacion             →  rho_scalar()
-//    [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S
+//    [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S, K_I
 //    [4] Ley SMC articular                    →  tick()
 // ============================================================================
 
@@ -87,6 +101,7 @@ using namespace std::chrono_literals;
 static constexpr double PI      = M_PI;
 static constexpr int    NARM    = 4;
 static constexpr double TAU_MAX = 1.2;    // [N·m] limite de torque por articulacion
+static constexpr double DT      = 0.005;  // [s] periodo de control, 200 Hz simulados (no modificar)
 // Suavizado del tanh de Coulomb del feedforward de friccion (no modificar).
 // Se alimenta con la velocidad DESEADA (sin ruido): eps pequeno es seguro.
 static constexpr double FRIC_EPS = 0.05;  // [rad/s]
@@ -100,22 +115,29 @@ static constexpr double T_TRANS = 3.0;   // [s]
 //  Ajustar los valores para cada articulacion [joint1, joint2, joint3, joint4]
 //
 //  Rangos recomendados (lazo discreto a 200 Hz, Ts = 5 ms):
-//    LAMBDA_Q : 5.0 – 15.0   [1/s]     (ancho de banda de la superficie)
-//    K_V      : 5.0 – 15.0             (alcance exponencial; mayor = convergencia mas rapida)
-//    K_S      : 1.0 – 10.0   [rad/s²]  (ganancia de conmutacion)
+//    LAMBDA_Q : 5  – 30    [1/s]     (ancho de banda de la superficie)
+//    K_V      : 5  – 50              (alcance exponencial; proporcional a s)
+//    K_S      : 1  – 40    [rad/s²]  (ganancia de conmutacion)
+//    K_I      : 50 – 800   [1/s²]    (integral de s; solo con integral:=true)
 //
-//  Criterio: K_S solo debe dominar la INCERTIDUMBRE acotada (±20% de masa,
-//  carga de 100 g), no la dinamica completa. Un K_S grande produce un ciclo
-//  limite de chattering de amplitud |s| ~ K_S*Ts que nunca entra en la capa
-//  limite (sat(s/phi) degenera en sign(s)). Ganancia efectiva dentro de la
-//  capa: K_V + K_S/phi <= (0.2~0.3)/Ts.
-//  Sugerencia: joint4 tolera K_S y Lambda mayores que joint1..3 (su inercia
-//  es diminuta y el residual de friccion de Coulomb domina su error).
+//  Criterio:
+//   · K_S debe superar la perturbacion en aceleracion d = M^-1*dtau de la
+//     incertidumbre que se quiere dominar (±20 % de masa). joint3 y joint4
+//     reciben la mayor perturbacion: su inercia efectiva 1/(M^-1)_ii es diminuta.
+//   · Pendiente dentro de la capa: K_eff = K_V + K_S/phi <= 75 [1/s]. Fuera de
+//     la capa solo queda K_V: conviene que no sea pequeno.
+//   · Sin integral, el error DC es ~ d/(Lambda*K_eff).
+//   · Dentro de la capa la ley equivale a un PID:
+//       kd = Lambda + K_eff    kp = Lambda*K_eff + K_I    ki = Lambda*K_I
 // ═══════════════════════════════════════════════════════════════════════════
 static const Eigen::Vector4d LAMBDA_Q = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 static const Eigen::Vector4d K_V      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 static const Eigen::Vector4d K_S      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
+static const Eigen::Vector4d K_I      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Tope anti-windup del termino integral |z_i| <= Z_MAX_i [rad/s²] (no modificar)
+static const Eigen::Vector4d Z_MAX = {20.0, 100.0, 150.0, 600.0};
 
 // ── Estructura de referencia articular ───────────────────────────────────────
 using omx::Reference;   // {q, dq, ddq}
@@ -166,8 +188,8 @@ static Reference desiredTrajectory(double t)
 //  [SECCION 2] Funciones de conmutacion — COMPLETAR
 //
 //  Implementar rho(s) para cada tipo:
-//    sign : rho(s) = +1 si s > 0,  -1 si s < 0,  0 si s == 0
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
+//    sign : rho(s) = +1 si s > 0,  -1 si s < 0,  0 si s == 0
 // ─────────────────────────────────────────────────────────────────────────────
 enum class RhoFunc { SIGN, SAT };
 
@@ -203,26 +225,31 @@ public:
   SMCJointSimNode()
   : Node("gz_smc_joint_node"), t_(0.0)
   {
+    // ── Reloj de simulacion: el timer avanza con /clock de Gazebo ────────────
+    this->set_parameter(rclcpp::Parameter("use_sim_time", true));
+
     // ── Parametros ────────────────────────────────────────────────────────────
     this->declare_parameter<int>        ("test_num", 1);
     this->declare_parameter<double>     ("t_run",    0.0);
-    this->declare_parameter<std::string>("rho_func", "sign");
-    this->declare_parameter<double>     ("phi",      0.15);
+    this->declare_parameter<std::string>("rho_func", "sat");
+    this->declare_parameter<double>     ("phi",      0.6);
+    this->declare_parameter<bool>       ("integral", false);
 
     const int         test_num = this->get_parameter("test_num").as_int();
     t_run_                     = this->get_parameter("t_run").as_double();
     phi_                       = this->get_parameter("phi").as_double();
+    integral_                  = this->get_parameter("integral").as_bool();
     const std::string rho_str  = this->get_parameter("rho_func").as_string();
 
-    if (rho_str == "sat") {
-      rho_func_ = RhoFunc::SAT;
-      rho_str_  = "sat";
-    } else {
+    if (rho_str == "sign") {
       rho_func_ = RhoFunc::SIGN;
       rho_str_  = "sign";
-      if (rho_str != "sign") {
+    } else {
+      rho_func_ = RhoFunc::SAT;
+      rho_str_  = "sat";
+      if (rho_str != "sat") {
         RCLCPP_WARN(this->get_logger(),
-          "rho_func '%s' desconocida — usando 'sign'", rho_str.c_str());
+          "rho_func '%s' desconocida — usando 'sat'", rho_str.c_str());
       }
     }
 
@@ -243,13 +270,19 @@ public:
     fric_coulomb_ = model_.urdfFriction();
 
     RCLCPP_INFO(this->get_logger(),
-      "SMC articular — rho=%s  phi=%.3f  tau_max=%.2f N·m",
-      rho_str_.c_str(), phi_, TAU_MAX);
+      "SMC articular — rho=%s  phi=%.3f  integral=%s  tau_max=%.2f N·m",
+      rho_str_.c_str(), phi_, integral_ ? "true" : "false", TAU_MAX);
     RCLCPP_INFO(this->get_logger(),
       "Lambda=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]",
       LAMBDA_Q[0], LAMBDA_Q[1], LAMBDA_Q[2], LAMBDA_Q[3],
       K_V[0],      K_V[1],      K_V[2],      K_V[3],
       K_S[0],      K_S[1],      K_S[2],      K_S[3]);
+    if (integral_) {
+      RCLCPP_INFO(this->get_logger(),
+        "Ki=[%.1f %.1f %.1f %.1f]  z_max=[%.1f %.1f %.1f %.1f]",
+        K_I[0],   K_I[1],   K_I[2],   K_I[3],
+        Z_MAX[0], Z_MAX[1], Z_MAX[2], Z_MAX[3]);
+    }
     RCLCPP_INFO(this->get_logger(),
       "Friccion URDF — Fv=[%.4f %.4f %.4f %.4f] N·m·s/rad  "
       "Fc=[%.4f %.4f %.4f %.4f] N·m  (eps=%.2f)",
@@ -269,7 +302,9 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    timer_ = this->create_wall_timer(5ms, [this]() { tick(); });
+    timer_ = rclcpp::create_timer(
+      this, this->get_clock(), rclcpp::Duration::from_seconds(DT),
+      [this]() { tick(); });
   }
 
   ~SMCJointSimNode()
@@ -293,8 +328,20 @@ private:
       "q1_des,q2_des,q3_des,q4_des,"
       "dq1_des,dq2_des,dq3_des,dq4_des,"
       "s1,s2,s3,s4,"
-      "tau1,tau2,tau3,tau4",
+      "tau1,tau2,tau3,tau4,"
+      "z1,z2,z3,z4",
       this->get_logger());
+  }
+
+  // Termino integral de la ley de alcance (infraestructura, no modificar):
+  // dz/dt = K_I*s, con tope |z_i| <= Z_MAX_i. Vale cero con integral:=false y
+  // se congela si el tick anterior saturo algun torque.
+  void update_integral(const Eigen::Vector4d & s)
+  {
+    if (integral_ && !tau_saturated_prev_) {
+      z_ += DT * K_I.cwiseProduct(s);
+      z_ = z_.cwiseMin(Z_MAX).cwiseMax(-Z_MAX);
+    }
   }
 
   // ── Tick de control a 200 Hz ──────────────────────────────────────────────
@@ -340,7 +387,8 @@ private:
 
     // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 4] Ley SMC articular — COMPLETAR
-    //  Disponible: M (4x4), phi_nle (4x1), tau_fric (4x1), ref.q, ref.dq, ref.ddq
+    //  Disponible: M (4x4), phi_nle (4x1), tau_fric (4x1), ref.q, ref.dq, ref.ddq,
+    //              z_ (4x1, termino integral)
     // ─────────────────────────────────────────────────────────────────────────
 
     //  4.1 Errores articulares:
@@ -355,13 +403,17 @@ private:
     // COMPLETAR
     const Eigen::Vector4d rho = Eigen::Vector4d::Zero();
 
-    // 4.4 Aceleracion articular virtual:
+    // Termino integral z_ (infraestructura, no modificar):
+    update_integral(s_q);
+
+    // 4.4 Aceleracion articular virtual (restar z_; con integral:=false vale 0):
     // COMPLETAR
     const Eigen::Vector4d v_q = Eigen::Vector4d::Zero();
 
     // 4.5 Torque:
     const Eigen::Vector4d tau     = Eigen::Vector4d::Zero();
     const Eigen::Vector4d tau_sat = tau.cwiseMin(TAU_MAX).cwiseMax(-TAU_MAX);
+    tau_saturated_prev_ = (tau.cwiseAbs().maxCoeff() >= TAU_MAX);   // anti-windup (no modificar)
 
     // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
     (void)M; (void)phi_nle; (void)tau_fric; (void)e_dq; (void)rho; (void)v_q;
@@ -388,10 +440,11 @@ private:
            << ',' << ref.dq[0]  << ',' << ref.dq[1]  << ',' << ref.dq[2]  << ',' << ref.dq[3]
            << ',' << s_q[0]     << ',' << s_q[1]     << ',' << s_q[2]     << ',' << s_q[3]
            << ',' << tau_sat[0] << ',' << tau_sat[1] << ',' << tau_sat[2] << ',' << tau_sat[3]
+           << ',' << z_[0]      << ',' << z_[1]      << ',' << z_[2]      << ',' << z_[3]
            << '\n';
     }
 
-    t_ += 0.005;
+    t_ += DT;
 
     if (t_run_ > 0.0 && t_ >= T_TRANS + t_run_) {
       RCLCPP_INFO(this->get_logger(),
@@ -405,6 +458,10 @@ private:
         RCLCPP_INFO(this->get_logger(), "CSV cerrado: %s", csv_path_.c_str());
       }
       timer_->cancel();
+      // Fin de la ejecucion sin Ctrl+C: breve espera para que el torque cero
+      // llegue al controlador de Gazebo y luego se cierra el proceso
+      rclcpp::sleep_for(100ms);
+      rclcpp::shutdown();
     }
   }
 
@@ -422,6 +479,10 @@ private:
   RhoFunc     rho_func_;
   std::string rho_str_;
   double      phi_;
+
+  bool            integral_ = false;
+  Eigen::Vector4d z_ {0.0, 0.0, 0.0, 0.0};   // termino integral [rad/s²]
+  bool            tau_saturated_prev_ = false;
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
   omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)

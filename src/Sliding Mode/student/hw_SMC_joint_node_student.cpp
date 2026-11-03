@@ -7,33 +7,39 @@
  * ──────────────────────────────────────────────────────────────────────────
  * SECCIONES A COMPLETAR:
  *   [1] Trayectoria articular de referencia  →  desiredTrajectory()
- *   [2] Funciones de conmutacion             →  rho_scalar()
- *   [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S
+ *   [2] Funcion de conmutacion sat(s/phi)    →  rho_scalar()
+ *   [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S, K_I
  *   [4] Ley SMC articular                    →  compute_torque()
  * El resto (hardware Dynamixel, filtro alpha-beta, transicion quintica,
- * conversion torque→corriente, guardas de seguridad, CSV) es
- * INFRAESTRUCTURA: no modificar.
+ * integracion de z con anti-windup, conversion torque→corriente, guardas de
+ * seguridad, CSV) es INFRAESTRUCTURA: no modificar.
  * ──────────────────────────────────────────────────────────────────────────
  *
  * Superficie deslizante articular:
  *   e_q  = q  - q_d,   e_dq = dq - dq_d
  *   s_q  = e_dq + Lambda_q * e_q
  *
- * Ley de control SMC (ley de alcance exponencial + conmutacion):
- *   v_q  = ddq_d - Lambda_q*e_dq - K_v*s_q - K_s*rho(s_q)
+ * Ley de control SMC (ley de alcance exponencial + conmutacion + integral):
+ *   v_q  = ddq_d - Lambda_q*e_dq - K_V*s_q - K_S*sat(s_q/phi) - z
  *   tau  = M(q)*v_q + Phi(q,dq)          [RNEA de Pinocchio]
  *   tau_sat = clamp(tau, -tau_max, tau_max)
+ *
+ * Termino integral de la ley de alcance (parametro integral):
+ *   dz/dt = K_I*s_q,   |z_i| <= Z_MAX_i,   z(0) = 0
+ *   integral:=false -> z = 0 (SMC clasico)
+ *   integral:=true  -> z integra en la transicion y el seguimiento, se congela
+ *                      en el retorno y la pausa final, y mientras el torque o
+ *                      la corriente saturan.
  *
  * NOTA sobre la friccion: a diferencia de los nodos gz (feedforward del URDF
  * a nivel de torque), en hardware la friccion REAL se compensa en el modelo
  * torque→corriente identificado (Fv, Fc en ticks, con Fc alimentado por la
  * velocidad DESEADA). NO agregar tau_fric del URDF aqui: seria doble
  * compensacion. El residual de friccion es la incertidumbre acotada que el
- * termino K_s*rho(s) debe dominar.
+ * termino K_S*rho(s) debe dominar.
  *
- * Funciones de conmutacion (elemento a elemento):
- *   "sign" -> rho(s) = sign(s)
- *   "sat"  -> rho(s) = sat(s/phi)     phi: capa limite [rad/s]
+ * Funcion de conmutacion (elemento a elemento):
+ *   rho(s) = sat(s/phi)     phi: capa limite [rad/s]
  *
  * Trayectoria articular de referencia (omega = 1.0 rad/s, identica a gz):
  *   q_d = [ (pi/4)*sin(w*t'), -0.45+0.5*sin(w*t'), 0.35-0.5*sin(w*t'),
@@ -56,12 +62,12 @@
  *
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
  *   port_name          [string]  "/dev/ttyUSB0"
- *   gain_scale         [double]  1.0    (escala lineal de K_V y K_S; Lambda fija)
+ *   gain_scale         [double]  1.0    (escala K_V y K_S; K_I con su cuadrado; Lambda fija)
  *   t_run              [double]  20.0   (duracion del SEGUIMIENTO [s];
  *                                        total = T_TRANS + t_run)
- *   test_num           [int]     1      (CSV: hw_smc_joint_<rho_func>_<test_num>.csv)
- *   rho_func           [string]  "sat"  (funcion de conmutacion: "sign" | "sat")
+ *   test_num           [int]     1      (CSV: hw_smc_joint_sat_<test_num>.csv)
  *   phi                [double]  0.3    (capa limite para sat(s/phi) [rad/s])
+ *   integral           [bool]    false  (activa el termino integral z)
  *   ab_alpha           [double]  0.2    (filtro α-β: ganancia de posicion)
  *   ab_beta            [double]  0.02   (filtro α-β: ganancia de velocidad)
  *   friction_fc_scale  [double]  0.95   (fraccion de Fc compensada; Fc usa dq DESEADA)
@@ -72,20 +78,21 @@
  * motor_I_offset, motor_epsilon_friction, joint_zero_tick, encoder_sign,
  * current_sign, joint_lower/upper, current_*_limit, tau_max.
  *
- * CSV: data/smc/real/act1/hw_smc_joint_<rho_func>_<test_num>.csv
+ * CSV: data/smc/real/act1/hw_smc_joint_sat_<test_num>.csv
  * Columnas (compatibles con plots_SMC_joint.m, mode='real'):
  *   t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des, s1..s4,
- *   tau1..tau4, dq1_filt..dq4_filt, curr_cmd1..4, curr_meas1..4
- * (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max.)
+ *   tau1..tau4, dq1_filt..dq4_filt, curr_cmd1..4, curr_meas1..4, z1..z4
+ * (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max. El
+ * nombre no distingue integral: usar un test_num distinto para cada ensayo.)
  *
  * Publisher: /hw/joint_states (sensor_msgs/JointState) — solo monitoreo
  *
  * Ejemplos de ejecucion (primer run SIEMPRE con gain_scale:=0.5):
  *   ros2 run open_manipulator_x_torque_control hw_smc_joint_node_student \
- *     --ros-args -p gain_scale:=0.5 -p rho_func:=sat -p test_num:=1 -p t_run:=30.0
+ *     --ros-args -p gain_scale:=0.5 -p test_num:=1 -p t_run:=30.0
  *
  *   ros2 run open_manipulator_x_torque_control hw_smc_joint_node_student \
- *     --ros-args -p rho_func:=sat -p phi:=0.3 -p test_num:=2 -p t_run:=30.0
+ *     --ros-args -p integral:=true -p gain_scale:=0.5 -p test_num:=2 -p t_run:=30.0
  *
  * ADVERTENCIA: No ejecutar junto a hardware.launch.py ni ningun proceso
  * que acceda a /dev/ttyUSB0 (ros2_control_node, dynamixel_hardware_interface).
@@ -150,16 +157,25 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //    kp_eq = Lambda*(K_V + K_S/phi)   kd_eq = Lambda + K_V + K_S/phi
 //  Apuntar a kp_eq del orden de cientos en J1–J3 y de miles en J4.
 //
+//  Con integral:=true se suman kp_eq += K_I y ki_eq = Lambda*K_I.
+//
 //  Rangos recomendados (con phi = 0.3):
 //    LAMBDA_Q : 15 – 45   [1/s]
 //    K_V      : 10 – 60
 //    K_S      : 1  – 8    [rad/s²]
+//    K_I      : 2  – 30   [1/s²]     (integral de s; solo con integral:=true)
+//  El integral debe ser LENTO: la inercia del rotor no esta en M(q) y reduce la
+//  ganancia real de lazo, de modo que un K_I alto oscila aunque elimine el DC.
 //  Primer run SIEMPRE con gain_scale:=0.5.
 // ═══════════════════════════════════════════════════════════════════════════
 static const Vec4 LAMBDA_Q = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
 static const Vec4 K_V      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
 static const Vec4 K_S      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
+static const Vec4 K_I      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Tope anti-windup del termino integral |z_i| <= Z_MAX_i [rad/s²] (no modificar)
+static const Vec4 Z_MAX = (Vec4() << 30.0, 30.0, 50.0, 200.0).finished();
 
 // ============================================================
 // Trayectoria articular de referencia (identica a gz_SMC_joint_node)
@@ -210,34 +226,24 @@ static Reference desiredTrajectory(double t)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  [SECCION 2] Funciones de conmutacion — COMPLETAR
+//  [SECCION 2] Funcion de conmutacion — COMPLETAR
 //
-//  Implementar rho(s) para cada tipo:
-//    sign : rho(s) = +1 si s > 0,  -1 si s < 0,  0 si s == 0
+//  Implementar la saturacion (funcion unica en este nodo):
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
 // ─────────────────────────────────────────────────────────────────────────────
-enum class RhoFunc { SIGN, SAT };
-
-static double rho_scalar(double s, RhoFunc func, double phi)
+static double rho_scalar(double s, double phi)
 {
   (void)s; (void)phi;
 
-  switch (func) {
-    case RhoFunc::SIGN:
-      return 0.0;  // COMPLETAR: sign(s)
-    case RhoFunc::SAT:
-      return 0.0;  // COMPLETAR: sat(s/phi) = clamp(s/phi, -1, 1)
-    default:
-      return 0.0;
-  }
+  return 0.0;  // COMPLETAR: sat(s/phi) = clamp(s/phi, -1, 1)
 }
 
 // Aplica rho_scalar elemento a elemento sobre el vector s (no modificar)
-[[maybe_unused]] static Vec4 rho_vec(const Vec4 & s, RhoFunc func, double phi)
+[[maybe_unused]] static Vec4 rho_vec(const Vec4 & s, double phi)
 {
   Vec4 r;
   for (int i = 0; i < NUM_JOINTS; ++i) {
-    r[i] = rho_scalar(s[i], func, phi);
+    r[i] = rho_scalar(s[i], phi);
   }
   return r;
 }
@@ -257,8 +263,8 @@ public:
     this->declare_parameter<double>     ("gain_scale",     1.0);
     this->declare_parameter<double>     ("t_run",          20.0);
     this->declare_parameter<int>        ("test_num",       1);
-    this->declare_parameter<std::string>("rho_func",       "sat");
     this->declare_parameter<double>     ("phi",            0.3);
+    this->declare_parameter<bool>       ("integral",       false);
 
     this->declare_parameter<double>("ab_alpha", 0.2);
     this->declare_parameter<double>("ab_beta",  0.02);
@@ -272,19 +278,7 @@ public:
     t_run_      = this->get_parameter("t_run").as_double();
     const int test_num = this->get_parameter("test_num").as_int();
     phi_        = this->get_parameter("phi").as_double();
-    const std::string rho_str = this->get_parameter("rho_func").as_string();
-
-    if (rho_str == "sign") {
-      rho_func_ = RhoFunc::SIGN;
-      rho_str_  = "sign";
-    } else {
-      rho_func_ = RhoFunc::SAT;
-      rho_str_  = "sat";
-      if (rho_str != "sat") {
-        RCLCPP_WARN(get_logger(),
-          "rho_func '%s' desconocida — usando 'sat'", rho_str.c_str());
-      }
-    }
+    integral_   = this->get_parameter("integral").as_bool();
 
     ab_alpha_ = get_parameter("ab_alpha").as_double();
     ab_beta_  = get_parameter("ab_beta").as_double();
@@ -294,13 +288,19 @@ public:
     RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  t_run(seguimiento)=%.1fs  test=%d",
       port_name_.c_str(), gain_scale_, t_run_, test_num);
     RCLCPP_INFO(get_logger(),
-      "SMC articular hw — rho=%s  phi=%.3f  tau_max=%.2f N·m  T_trans=%.1f s",
-      rho_str_.c_str(), phi_, hw_.limits.tau_max, T_TRANS);
+      "SMC articular hw — rho=sat  phi=%.3f  integral=%s  tau_max=%.2f N·m  T_trans=%.1f s",
+      phi_, integral_ ? "true" : "false", hw_.limits.tau_max, T_TRANS);
     RCLCPP_INFO(get_logger(),
       "Lambda=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]",
       LAMBDA_Q[0], LAMBDA_Q[1], LAMBDA_Q[2], LAMBDA_Q[3],
       K_V[0],      K_V[1],      K_V[2],      K_V[3],
       K_S[0],      K_S[1],      K_S[2],      K_S[3]);
+    if (integral_) {
+      RCLCPP_INFO(get_logger(),
+        "Ki=[%.1f %.1f %.1f %.1f]  z_max=[%.1f %.1f %.1f %.1f]",
+        K_I[0],   K_I[1],   K_I[2],   K_I[3],
+        Z_MAX[0], Z_MAX[1], Z_MAX[2], Z_MAX[3]);
+    }
     RCLCPP_INFO(get_logger(),
       "motor α=[%.1f %.1f %.1f %.1f]  Fv=[%.2f %.2f %.2f %.2f]  ε=%.3f",
       hw_.motor.alpha(0), hw_.motor.alpha(1), hw_.motor.alpha(2), hw_.motor.alpha(3),
@@ -325,8 +325,8 @@ public:
     RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d", model_.nv());
 
     // ── CSV ──────────────────────────────────────────────────────────────────
-    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/smc/real/act1/hw_smc_joint_"
-                + rho_str_ + "_" + std::to_string(test_num) + ".csv";
+    csv_path_ = std::string(PACKAGE_DATA_DIR) + "/smc/real/act1/hw_smc_joint_sat_"
+                + std::to_string(test_num) + ".csv";
     omx::openCsv(csv_, csv_path_,
       "t,q1,q2,q3,q4,dq1,dq2,dq3,dq4,"
       "q1_des,q2_des,q3_des,q4_des,dq1_des,dq2_des,dq3_des,dq4_des,"
@@ -334,7 +334,8 @@ public:
       "tau1,tau2,tau3,tau4,"
       "dq1_filt,dq2_filt,dq3_filt,dq4_filt,"
       "curr_cmd1,curr_cmd2,curr_cmd3,curr_cmd4,"
-      "curr_meas1,curr_meas2,curr_meas3,curr_meas4",
+      "curr_meas1,curr_meas2,curr_meas3,curr_meas4,"
+      "z1,z2,z3,z4",
       get_logger());
 
     // ── Publisher de monitoreo ────────────────────────────────────────────────
@@ -366,11 +367,25 @@ public:
 private:
   // ─────────────────────────────────────────────────────────────────────────
   //  Ley de control SMC articular
-  //  gain_scale escala K_V y K_S linealmente (autoridad de alcance y
-  //  conmutacion); Lambda define la superficie y no se escala.
+  //  gain_scale escala K_V y K_S linealmente y K_I con su cuadrado: el margen
+  //  del integral depende de kd*kp, asi que bajar la ganancia no lo reduce.
+  //  Lambda define la superficie y no se escala. integrate habilita la
+  //  actualizacion del termino integral.
   // ─────────────────────────────────────────────────────────────────────────
 
-  Vec4 compute_torque(const Vec4& q, const Vec4& dq, const Reference& ref, Vec4& s_out)
+  // Termino integral de la ley de alcance (infraestructura, no modificar):
+  // dz/dt = K_I*s, con tope |z_i| <= Z_MAX_i. Vale cero con integral:=false y
+  // se congela si el tick anterior saturo torque o corriente.
+  void update_integral(const Vec4& s, bool integrate)
+  {
+    if (integrate && !tau_saturated_prev_) {
+      z_ += Ts_ * (K_I * gain_scale_ * gain_scale_).cwiseProduct(s);
+      z_ = z_.cwiseMin(Z_MAX).cwiseMax(-Z_MAX);
+    }
+  }
+
+  Vec4 compute_torque(const Vec4& q, const Vec4& dq, const Reference& ref,
+                      bool integrate, Vec4& s_out)
   {
     const Vec4 k_v = K_V * gain_scale_;
     const Vec4 k_s = K_S * gain_scale_;
@@ -387,13 +402,14 @@ private:
     //    ref.q, ref.dq, ref.ddq — referencia y sus derivadas analiticas
     //    M4 (4x4), nle4 (4x1)   — dinamica nominal M(q) y Phi(q,dq)
     //    LAMBDA_Q, k_v, k_s     — ganancias (k_v, k_s ya escaladas)
-    //    rho_vec(s, rho_func_, phi_) — funcion de conmutacion vectorial
+    //    z_ (4x1)               — termino integral (cero con integral:=false)
+    //    rho_vec(s, phi_)       — funcion de conmutacion vectorial
     //
     //  Ley (guia SMC; en hardware SIN tau_fric del URDF — la friccion
     //  real se compensa en torque_to_current con el modelo del motor):
     //    e_q  = q - q_d          e_dq = dq - dq_d
     //    s_q  = e_dq + Lambda_q .* e_q          (asignar a s_out)
-    //    v_q  = ddq_d - Lambda_q.*e_dq - k_v.*s_q - k_s.*rho(s_q)
+    //    v_q  = ddq_d - Lambda_q.*e_dq - k_v.*s_q - k_s.*rho(s_q) - z_
     //    tau  = M4 * v_q + nle4
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -404,8 +420,11 @@ private:
     // 4.2 Superficie deslizante:
     const Vec4 s_q = Vec4::Zero();    // COMPLETAR
 
-    // 4.3 Funcion de conmutacion: rho = rho_vec(s_q, ...)
+    // 4.3 Funcion de conmutacion: rho = rho_vec(s_q, phi_)
     const Vec4 rho = Vec4::Zero();    // COMPLETAR
+
+    // Termino integral z_ (infraestructura, no modificar):
+    update_integral(s_q, integrate);
 
     // 4.4 Aceleracion articular virtual:
     const Vec4 v_q = Vec4::Zero();    // COMPLETAR
@@ -528,9 +547,13 @@ private:
 
     // 5. Ley de control — usa dq_hat_ para reducir chattering por ruido de encoder
     Vec4 s_q;
-    const Vec4 tau_unsat = compute_torque(q, dq_hat_, ref, s_q);
+    const bool integrate = integral_ && (in_trans || in_tracking);
+    const Vec4 tau_unsat = compute_torque(q, dq_hat_, ref, integrate, s_q);
     const Vec4 tau = tau_unsat.cwiseMin(hw_.limits.tau_max).cwiseMax(-hw_.limits.tau_max);
-    const auto cur_cmd = omx::torqueToCurrent(hw_, tau, dq_hat_, ref.dq);
+    std::array<bool, NUM_JOINTS> clipped{};
+    const auto cur_cmd = omx::torqueToCurrent(hw_, tau, dq_hat_, ref.dq, &clipped);
+    tau_saturated_prev_ = (tau_unsat.cwiseAbs().maxCoeff() >= hw_.limits.tau_max)
+                        || clipped[0] || clipped[1] || clipped[2] || clipped[3];
 
     // 6. Escribir corriente
     if (!arm_.writeCurrents(cur_cmd)) {
@@ -579,6 +602,7 @@ private:
            << ',' << dq_hat_(0) << ',' << dq_hat_(1) << ',' << dq_hat_(2) << ',' << dq_hat_(3)
            << ',' << cur_cmd[0] << ',' << cur_cmd[1]  << ',' << cur_cmd[2] << ',' << cur_cmd[3]
            << ',' << cur_meas[0]<< ',' << cur_meas[1] << ',' << cur_meas[2]<< ',' << cur_meas[3]
+           << ',' << z_(0)      << ',' << z_(1)       << ',' << z_(2)      << ',' << z_(3)
            << '\n';
     }
 
@@ -589,8 +613,8 @@ private:
                           in_tracking ? "TRAY " :
                           (t < T_TRANS + t_run_ + RETURN_TIME_S) ? "RET  " : "HOME ";
       RCLCPP_INFO(get_logger(),
-        "[%s] t=%.2fs  |s|=%.4f  |e|=%.4f rad  i=[%d %d %d %d]",
-        phase, t, s_q.norm(), (q - ref.q).norm(),
+        "[%s] t=%.2fs  |s|=%.4f  |e|=%.4f rad  |z|=%.2f  i=[%d %d %d %d]",
+        phase, t, s_q.norm(), (q - ref.q).norm(), z_.norm(),
         cur_cmd[0], cur_cmd[1], cur_cmd[2], cur_cmd[3]);
     }
 
@@ -615,9 +639,11 @@ private:
 
   std::string port_name_;
   double gain_scale_, t_run_;
-  RhoFunc     rho_func_{RhoFunc::SAT};
-  std::string rho_str_;
-  double      phi_;
+  double phi_;
+
+  bool integral_{false};
+  Vec4 z_{Vec4::Zero()};              // termino integral [rad/s²]
+  bool tau_saturated_prev_{false};    // anti-windup
 
   omx::HwConfig hw_;   // modelo del motor, calibracion y limites (YAML del motor)
 

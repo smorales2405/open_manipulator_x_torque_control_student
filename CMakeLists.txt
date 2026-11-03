@@ -265,7 +265,7 @@ target_compile_definitions(hw_smc_joint_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\"")
 
-# ── hw_smc_cart_node_student (estudiantes, SMC/ISMC cartesiano hw) ───────────
+# ── hw_smc_cart_node_student (estudiantes, SMC cartesiano hw) ───────────
 add_executable(hw_smc_cart_node_student "${SMC_STUD}/hw_SMC_cart_node_student.cpp")
 ament_target_dependencies(hw_smc_cart_node_student rclcpp sensor_msgs)
 target_link_libraries(hw_smc_cart_node_student omx_common)
@@ -273,27 +273,6 @@ target_compile_features(hw_smc_cart_node_student PUBLIC cxx_std_17)
 target_compile_definitions(hw_smc_cart_node_student PRIVATE
   "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\"")
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${SMC_INSTR}")  # nodos de instructor
-# ── hw_smci_cart_node (ISMC cartesiano en hardware real) ─────────────────────
-add_executable(hw_smci_cart_node "${SMC_INSTR}/hw_SMCI_cart_node.cpp")
-ament_target_dependencies(hw_smci_cart_node rclcpp sensor_msgs)
-target_link_libraries(hw_smci_cart_node omx_common)
-target_compile_features(hw_smci_cart_node PUBLIC cxx_std_17)
-target_compile_definitions(hw_smci_cart_node PRIVATE
-  "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
-  "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\"")
-
-# ── gz_SMCI_cart_node ────────────────────────────────────────────────────────
-add_executable(gz_SMCI_cart_node "${SMC_INSTR}/gz_SMCI_cart_node.cpp")
-ament_target_dependencies(gz_SMCI_cart_node rclcpp std_msgs sensor_msgs)
-target_link_libraries(gz_SMCI_cart_node omx_common)
-target_compile_features(gz_SMCI_cart_node PUBLIC cxx_std_17)
-target_compile_definitions(gz_SMCI_cart_node PRIVATE
-  "PACKAGE_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
-  "PACKAGE_URDF_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/urdf\"")
-
-endif()  # SMC_INSTR
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${MRAC_INSTR}")  # nodos de instructor
 # ── gz_mrac_joint_12p_node (MRAC 12 parametros: alpha+Fv+Fc, sim-to-real) ────
@@ -373,8 +352,8 @@ set(OMX_NODES
     hw_sinusoidal_torque_node
     hw_alpha_ident_node
     hw_torque_probe_node
-    gz_smc_joint_node gz_smc_cart_node gz_SMCI_cart_node
-    hw_smc_joint_node hw_smc_cart_node hw_smci_cart_node
+    gz_smc_joint_node gz_smc_cart_node
+    hw_smc_joint_node hw_smc_cart_node
     gz_smc_joint_node_student gz_smc_cart_node_student
     hw_smc_joint_node_student hw_smc_cart_node_student
     gz_mrac_joint_12p_node

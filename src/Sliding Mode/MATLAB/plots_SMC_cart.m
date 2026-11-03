@@ -8,6 +8,7 @@
 %   Figura 4 — Posiciones articulares q1..q4
 %   Figura 5 — Superficies deslizantes s1..s4
 %   Figura 6 — Torques de control tau1..tau4
+%   Figura 7 — Termino integral z1..z4 (solo si el nodo corrio con integral:=true)
 %
 %   Metricas reportadas en consola (Tabla 5 de la guia):
 %     Por salida cartesiana: e_max [m o rad]  |  e_RMS [m o rad]
@@ -24,9 +25,6 @@ mode        = 'sim';    % 'sim'  = simulacion Gazebo (gz_smc_cart_node)
 
 rho_func    = 'sat';   % Funcion de conmutacion: 'sign' | 'sat'
 
-controller  = 'smc';    % 'smc'  = gz_smc_cart_node (SMC clasico)
-                        % 'smci' = gz_SMCI_cart_node (SMC integral; mismo CSV + xi1..xi4)
-
 test_num    = 1;        % Identificador del ensayo (test_num usado al lanzar el nodo)
 
 EXPORT_FIGS = false;    % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
@@ -41,27 +39,18 @@ T_TRANS_S   = 5.0;      % [s] transicion quintica del nodo hw (debe coincidir);
 pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   % raiz del paquete (relativa a este script)
 
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
-% Sufijo del controlador: '' para SMC clasico, '_smci' para SMC integral
-if strcmp(controller, 'smci')
-    ctrl_suffix = '_smci';
-elseif strcmp(controller, 'smc')
-    ctrl_suffix = '';
-else
-    error('controller debe ser ''smc'' o ''smci''.');
-end
-
 switch mode
     case 'sim'
         csv_file   = fullfile(pkg_dir, 'data', 'smc', 'sim', 'act2', ...
-                              sprintf('gz_%s_cart_%s_%d.csv', controller, rho_func, test_num));
+                              sprintf('gz_smc_cart_%s_%d.csv', rho_func, test_num));
         output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim', 'act2', ...
-                              sprintf('test%d_%s%s', test_num, rho_func, ctrl_suffix));
+                              sprintf('test%d_%s', test_num, rho_func));
         mode_label = 'Simulacion';
     case 'real'
         csv_file   = fullfile(pkg_dir, 'data', 'smc', 'real', 'act2', ...
-                              sprintf('hw_%s_cart_%s_%d.csv', controller, rho_func, test_num));
+                              sprintf('hw_smc_cart_%s_%d.csv', rho_func, test_num));
         output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act2', ...
-                              sprintf('test%d_%s%s', test_num, rho_func, ctrl_suffix));
+                              sprintf('test%d_%s', test_num, rho_func));
         mode_label = 'Implementacion';
     otherwise
         error('mode debe ser ''sim'' o ''real''.');
@@ -109,6 +98,14 @@ cond_J = T.cond_J;
 % Errores cartesianos
 e_y = y - y_des;
 
+% Termino integral z1..z4: vale cero con integral:=false y no existe en los CSV
+% anteriores a ese parametro; la figura de z solo se genera si esta activo
+has_z = all(ismember({'z1','z2','z3','z4'}, T.Properties.VariableNames));
+if has_z
+    z_int = [T.z1, T.z2, T.z3, T.z4];
+    has_z = any(z_int(:) ~= 0);
+end
+
 %% ── Metricas (Tabla 5 de la guia) ───────────────────────────────────────────
 cartNames  = {'x [m]', 'y [m]', 'z [m]', 'phi [rad]'};
 cartSymbol = {'e_x', 'e_y', 'e_z', 'e_phi'};
@@ -141,6 +138,11 @@ end
 fprintf('\n  Condicionamiento del Jacobiano:\n');
 fprintf('  max kappa(J_y) = %.2f\n', max(cond_J));
 
+if has_z
+    fprintf('\n  Termino integral (z converge a menos la perturbacion en aceleracion):\n');
+    fprintf('  z media [m/s2, m/s2, m/s2, rad/s2] = [%.2f %.2f %.2f %.2f]\n', mean(z_int));
+end
+
 fprintf('%s\n\n', repmat('═', 1, 78));
 
 %% ── Estilo comun ─────────────────────────────────────────────────────────────
@@ -165,8 +167,8 @@ if isfield(rho_tex, rho_func)
 else
     rho_label = rho_func;
 end
-if strcmp(controller, 'smci')
-    sub_label = sprintf('[%s | ISMC | \\rho = %s]', mode_label, rho_label);
+if has_z
+    sub_label = sprintf('[%s | integral | \\rho = %s]', mode_label, rho_label);
 else
     sub_label = sprintf('[%s | \\rho = %s]', mode_label, rho_label);
 end
@@ -317,6 +319,31 @@ end
 title(tl6, sprintf('SMC Cartesiano — Torques de Control  %s', sub_label), ...
       'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 
+%% ── Figura 7 — Termino integral z1..z4 ──────────────────────────────────────
+if has_z
+    ylabels_z = {'$z_x$ [m/s$^2$]', '$z_y$ [m/s$^2$]', '$z_z$ [m/s$^2$]', '$z_\phi$ [rad/s$^2$]'};
+    titles_z  = {'Integral $z_x$', 'Integral $z_y$', 'Integral $z_z$', 'Integral $z_\phi$'};
+
+    figure(7); clf;
+    set(gcf, 'Color', 'w', 'Position', [150 -840 1100 520]);
+    tl7 = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+    for i = 1:4
+        nexttile(tl7);
+        plot(t, z_int(:,i), '-', 'Color', c_tau(i,:), 'LineWidth', lw); hold on;
+        yline(0, ':', 'LineWidth', 0.9, 'Color', [0.5 0.5 0.5]);
+        xlabel('Tiempo [s]', 'FontSize', fs);
+        ylabel(ylabels_z{i}, 'Interpreter', 'latex', 'FontSize', fs);
+        title(titles_z{i}, 'FontSize', fs, 'Interpreter', 'latex');
+        grid on; box on;
+        set(gca, 'FontSize', fs);
+        xlim(xlims);
+    end
+
+    title(tl7, sprintf('SMC Cartesiano — Termino Integral  %s', sub_label), ...
+          'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
+end
+
 %% ── Exportacion ──────────────────────────────────────────────────────────────
 if EXPORT_FIGS
     if ~exist(output_dir, 'dir')
@@ -338,6 +365,11 @@ if EXPORT_FIGS
     exportgraphics(figure(4), fullfile(output_dir, 'plot_q.eps'),              'ContentType', 'vector', 'Resolution', 600);
     exportgraphics(figure(5), fullfile(output_dir, 'plot_sliding_surfaces.eps'), 'ContentType', 'vector', 'Resolution', 600);
     exportgraphics(figure(6), fullfile(output_dir, 'plot_torques.eps'),        'ContentType', 'vector', 'Resolution', 600);
+
+    if has_z
+        exportgraphics(figure(7), fullfile(output_dir, 'plot_integral.png'), 'Resolution', 300);
+        exportgraphics(figure(7), fullfile(output_dir, 'plot_integral.eps'), 'ContentType', 'vector', 'Resolution', 600);
+    end
 
     fprintf('Graficas guardadas en:\n  %s\n', output_dir);
 end

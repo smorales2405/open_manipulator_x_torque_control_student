@@ -26,43 +26,58 @@
 //  posicion, velocidad Y aceleracion con la trayectoria de referencia en t=0
 //  (empalme C2: sin escalon de ydot_d/yddot_d al iniciar la fase SMC).
 //
-//  Lazo de control: 200 Hz (Ts = 5 ms).
+//  Lazo de control: 200 Hz de tiempo simulado (Ts = 5 ms). El nodo usa el reloj
+//  de Gazebo (use_sim_time=true): t_run y el CSV quedan en segundos simulados.
+//
+//  Termino integral de la ley de alcance (parametro integral):
+//    dz/dt = K_I*s,   |z_i| <= Z_MAX_i,   z(0) = 0
+//    integral:=false -> z = 0 (SMC clasico)
+//    integral:=true  -> z integra desde la transicion inicial y se congela
+//                       mientras el torque satura.
+//    La actualizacion de z_ y el anti-windup ya estan implementados: en la ley
+//    solo se resta z_ (ver SECCION de la ley de control).
 //
 //  Funciones de conmutacion (aplicadas elemento a elemento):
-//    "sign"  ->  rho(s) = sign(s)
 //    "sat"   ->  rho(s) = sat(s / phi)     phi: capa limite
+//    "sign"  ->  rho(s) = sign(s)
 //
 //  Suscriptor : /joint_states                    (sensor_msgs/JointState)
 //  Publicador : /arm_effort_controller/commands   (std_msgs/Float64MultiArray)
 //
 //  Parametros ROS 2:
 //    test_num  [int]     1        — identificador del CSV
-//    t_run     [double]  0.0      — duracion SMC en segundos (0 = ilimitado); total = T_TRANS + t_run
-//    rho_func  [string]  "sign"   — funcion de conmutacion: "sign" | "sat"
-//    phi       [double]  0.15     — capa limite [m/s o rad/s]
+//    t_run     [double]  0.0      — duracion SMC en segundos (0 = ilimitado); total = T_TRANS + t_run.
+//                                   Al terminar, el nodo se cierra solo.
+//    rho_func  [string]  "sat"    — funcion de conmutacion: "sat" | "sign"
+//    phi       [double]  0.2      — capa limite [m/s o rad/s]
+//    integral  [bool]    false    — activa el termino integral z
 //
 //  CSV: data/smc/sim/act2/gz_smc_cart_<rho_func>_<test_num>.csv
 //  Columnas: t, q1..q4, x,y,z,phi, x_des,y_des,z_des,phi_des,
 //            xdot,ydot,zdot,phidot, xdot_des,ydot_des,zdot_des,phidot_des,
-//            s1,s2,s3,s4, tau1..tau4, cond_J
-//  (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max.)
+//            s1,s2,s3,s4, tau1..tau4, cond_J, z1..z4
+//  (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max. El
+//  nombre no distingue integral: usar un test_num distinto para cada ensayo.)
 //
-//  Nota: usar sim_init_config.yaml con use_fixed_init: false y escalas
-//        nominales mass_inertia/damping/friction = 1.0.
+//  Nota: usar sim_init_config.yaml con use_fixed_init: true y escalas nominales
+//        mass_inertia/damping/friction = 1.0 (la friccion del feedforward debe
+//        coincidir con la de la planta: friction_scale 0.0 NO es valido aqui).
 //        El CSV almacena unicamente datos de la fase de seguimiento SMC.
 //
 //  Ejemplos de uso:
 //
-//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
+//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student --ros-args -p test_num:=1 -p t_run:=25.0
 //
-//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student --ros-args -p rho_func:=sat -p phi:=0.15 -p test_num:=2 -p t_run:=20.0
+//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student --ros-args -p rho_func:=sign -p test_num:=2 -p t_run:=25.0
+//
+//    ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student --ros-args -p integral:=true -p test_num:=3 -p t_run:=25.0
 //
 //  ──────────────────────────────────────────────────────────────────────────
 //  SECCIONES A COMPLETAR:
 //    [1] Trayectoria cartesiana de referencia  →  desiredTrajectory()
 //    [2] Vector Y_START                        →  constante Y_START
 //    [3] Funciones de conmutacion              →  rho_scalar()
-//    [4] Ganancias SMC                         →  LAMBDA_Y, K_V, K_S
+//    [4] Ganancias SMC                         →  LAMBDA_Y, K_V, K_S, K_I
 //    [5] Ley SMC cartesiana (pasos 7-10 y 12)  →  tick()
 // ============================================================================
 
@@ -97,6 +112,7 @@ using namespace std::chrono_literals;
 static constexpr double PI      = M_PI;
 static constexpr int    NARM    = 4;
 static constexpr double TAU_MAX = 1.2;    // [N·m] limite de torque por articulacion
+static constexpr double DT      = 0.005;  // [s] periodo de control, 200 Hz simulados (no modificar)
 // Suavizado del tanh de Coulomb del feedforward de friccion (no modificar).
 // Se alimenta con la velocidad DESEADA (sin ruido): eps pequeno es seguro.
 static constexpr double FRIC_EPS = 0.05;  // [rad/s]
@@ -126,24 +142,31 @@ static const Eigen::Vector4d Y_START {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 //  Ajustar los valores para cada salida cartesiana [x, y, z, phi]
 //
 //  Rangos recomendados (lazo discreto a 200 Hz, Ts = 5 ms):
-//    LAMBDA_Y : 1.0 – 10.0   [1/s]           (ancho de banda de la superficie)
-//    K_V      : 1.0 – 10.0                   (alcance exponencial; proporcional a la superficie)
-//    K_S      : 0.1 – 5.0    [m/s² | rad/s²] (ganancia de conmutacion)
+//    LAMBDA_Y : 5   – 35    [1/s]           (ancho de banda de la superficie)
+//    K_V      : 5   – 50                    (alcance exponencial; proporcional a s)
+//    K_S      : 0.1 – 15    [m/s² | rad/s²] (ganancia de conmutacion)
+//    K_I      : 20  – 400   [1/s²]          (integral de s; solo con integral:=true)
 //
-//  Criterio: K_S esta en unidades de aceleracion cartesiana y solo debe
-//  dominar la INCERTIDUMBRE acotada, no la dinamica completa. Un K_S grande
-//  produce chattering |s| ~ K_S*Ts fuera de la capa limite (sat degenera en
-//  sign) y un Lambda_Y muy alto demanda aceleraciones imposibles con
-//  tau_max = 1.2 N·m (saturacion permanente y vibracion del robot).
-//  Ganancia efectiva dentro de la capa: K_V + K_S/phi <= (0.2~0.3)/Ts.
-//  Sugerencia: el canal phi (dominado por joint4, de inercia diminuta y
-//  friccion de Coulomb relativamente grande) tolera Lambda, K_V y K_S
-//  mayores que x, y, z.
+//  Criterio:
+//   · K_S debe superar la perturbacion en aceleracion d_y = J_y*M^-1*dtau de la
+//     incertidumbre que se quiere dominar (±20 % de masa). El canal phi recibe
+//     la mayor perturbacion por la inercia efectiva diminuta de joint4.
+//   · phi es unico: sus unidades mezclan m/s y rad/s. La pendiente de cada
+//     canal se reparte entre K_V y K_S/phi.
+//   · Pendiente dentro de la capa: K_eff = K_V + K_S/phi <= 75 [1/s]. Fuera de
+//     la capa solo queda K_V: conviene que no sea pequeno.
+//   · Sin integral, el error DC es ~ d_y/(Lambda*K_eff).
+//   · Dentro de la capa la ley equivale a un PID:
+//       kd = Lambda + K_eff    kp = Lambda*K_eff + K_I    ki = Lambda*K_I
 // ═══════════════════════════════════════════════════════════════════════════
 static const Eigen::Vector4d LAMBDA_Y = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 static const Eigen::Vector4d K_V      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 static const Eigen::Vector4d K_S      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
+static const Eigen::Vector4d K_I      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Tope anti-windup del termino integral |z_i| <= Z_MAX_i [m/s² | rad/s²] (no modificar)
+static const Eigen::Vector4d Z_MAX = {40.0, 40.0, 60.0, 600.0};
 
 // ── Estructura de referencia cartesiana ──────────────────────────────────────
 using omx::CartRef;     // {y, ydot, yddot}, y = [x, y, z, phi]
@@ -202,8 +225,8 @@ static CartRef desiredTrajectory(double t)
 //  [SECCION 3] Funciones de conmutacion — COMPLETAR
 //
 //  Implementar rho(s) para cada tipo:
-//    sign : rho(s) = +1 si s > 0,  -1 si s < 0,  0 si s == 0
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
+//    sign : rho(s) = +1 si s > 0,  -1 si s < 0,  0 si s == 0
 // ─────────────────────────────────────────────────────────────────────────────
 enum class RhoFunc { SIGN, SAT };
 
@@ -239,26 +262,31 @@ public:
   SMCCartSimNode()
   : Node("gz_smc_cart_node"), t_(0.0), y0_initialized_(false)
   {
+    // ── Reloj de simulacion: el timer avanza con /clock de Gazebo ────────────
+    this->set_parameter(rclcpp::Parameter("use_sim_time", true));
+
     // ── Parametros ────────────────────────────────────────────────────────────
     this->declare_parameter<int>        ("test_num", 1);
     this->declare_parameter<double>     ("t_run",    0.0);
-    this->declare_parameter<std::string>("rho_func", "sign");
-    this->declare_parameter<double>     ("phi",      0.15);
+    this->declare_parameter<std::string>("rho_func", "sat");
+    this->declare_parameter<double>     ("phi",      0.2);
+    this->declare_parameter<bool>       ("integral", false);
 
     const int         test_num = this->get_parameter("test_num").as_int();
     t_run_                     = this->get_parameter("t_run").as_double();
     phi_                       = this->get_parameter("phi").as_double();
+    integral_                  = this->get_parameter("integral").as_bool();
     const std::string rho_str  = this->get_parameter("rho_func").as_string();
 
-    if (rho_str == "sat") {
-      rho_func_ = RhoFunc::SAT;
-      rho_str_  = "sat";
-    } else {
+    if (rho_str == "sign") {
       rho_func_ = RhoFunc::SIGN;
       rho_str_  = "sign";
-      if (rho_str != "sign") {
+    } else {
+      rho_func_ = RhoFunc::SAT;
+      rho_str_  = "sat";
+      if (rho_str != "sat") {
         RCLCPP_WARN(this->get_logger(),
-          "rho_func '%s' desconocida — usando 'sign'", rho_str.c_str());
+          "rho_func '%s' desconocida — usando 'sat'", rho_str.c_str());
       }
     }
 
@@ -278,13 +306,19 @@ public:
     fric_coulomb_ = model_.urdfFriction();
 
     RCLCPP_INFO(this->get_logger(),
-      "SMC cartesiano — rho=%s  phi=%.4f  tau_max=%.2f N·m",
-      rho_str_.c_str(), phi_, TAU_MAX);
+      "SMC cartesiano — rho=%s  phi=%.4f  integral=%s  tau_max=%.2f N·m",
+      rho_str_.c_str(), phi_, integral_ ? "true" : "false", TAU_MAX);
     RCLCPP_INFO(this->get_logger(),
-      "Lambda_y=[%.1f %.1f %.1f %.1f]  K_s=[%.1f %.1f %.1f %.1f]  K_y=[%.1f %.1f %.1f %.1f]",
+      "Lambda_y=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]",
       LAMBDA_Y[0], LAMBDA_Y[1], LAMBDA_Y[2], LAMBDA_Y[3],
       K_V[0],      K_V[1],      K_V[2],      K_V[3],
       K_S[0],      K_S[1],      K_S[2],      K_S[3]);
+    if (integral_) {
+      RCLCPP_INFO(this->get_logger(),
+        "Ki=[%.1f %.1f %.1f %.1f]  z_max=[%.1f %.1f %.1f %.1f]",
+        K_I[0],   K_I[1],   K_I[2],   K_I[3],
+        Z_MAX[0], Z_MAX[1], Z_MAX[2], Z_MAX[3]);
+    }
     RCLCPP_INFO(this->get_logger(),
       "lambda_DLS=%.3f  T_trans=%.1f s  Friccion URDF — "
       "Fv=[%.4f %.4f %.4f %.4f] N·m·s/rad  Fc=[%.4f %.4f %.4f %.4f] N·m",
@@ -307,7 +341,9 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    timer_ = this->create_wall_timer(5ms, [this]() { tick(); });
+    timer_ = rclcpp::create_timer(
+      this, this->get_clock(), rclcpp::Duration::from_seconds(DT),
+      [this]() { tick(); });
   }
 
   ~SMCCartSimNode()
@@ -333,8 +369,20 @@ private:
       "xdot_des,ydot_des,zdot_des,phidot_des,"
       "s1,s2,s3,s4,"
       "tau1,tau2,tau3,tau4,"
-      "cond_J",
+      "cond_J,"
+      "z1,z2,z3,z4",
       this->get_logger());
+  }
+
+  // Termino integral de la ley de alcance (infraestructura, no modificar):
+  // dz/dt = K_I*s, con tope |z_i| <= Z_MAX_i. Vale cero con integral:=false y
+  // se congela si el tick anterior saturo algun torque.
+  void update_integral(const Eigen::Vector4d & s)
+  {
+    if (integral_ && !tau_saturated_prev_) {
+      z_ += DT * K_I.cwiseProduct(s);
+      z_ = z_.cwiseMin(Z_MAX).cwiseMax(-Z_MAX);
+    }
   }
 
   // ── Tick de control a 200 Hz ──────────────────────────────────────────────
@@ -407,7 +455,7 @@ private:
     // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 5] Ley SMC cartesiana — COMPLETAR (pasos 7-10 y 12)
     //  Disponible: y, ydot, ref.y, ref.ydot, ref.yddot, J4, jdqd, M4, nle4,
-    //              tau_fric
+    //              tau_fric, z_ (4x1, termino integral)
     // ─────────────────────────────────────────────────────────────────────────
 
     // 7. Errores cartesianos:
@@ -422,7 +470,10 @@ private:
     // COMPLETAR
     const Eigen::Vector4d rho = Eigen::Vector4d::Zero();
 
-    // 10. Aceleracion cartesiana virtual:
+    // Termino integral z_ (infraestructura, no modificar):
+    update_integral(s_y);
+
+    // 10. Aceleracion cartesiana virtual (restar z_; con integral:=false vale 0):
     // COMPLETAR
     const Eigen::Vector4d v_y = Eigen::Vector4d::Zero();
 
@@ -436,6 +487,7 @@ private:
     // COMPLETAR
     const Eigen::Vector4d tau     = Eigen::Vector4d::Zero();
     const Eigen::Vector4d tau_sat = tau.cwiseMin(TAU_MAX).cwiseMax(-TAU_MAX);
+    tau_saturated_prev_ = (tau.cwiseAbs().maxCoeff() >= TAU_MAX);   // anti-windup (no modificar)
 
     // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
     (void)M4; (void)nle4; (void)tau_fric; (void)edot_y; (void)rho; (void)qddot;
@@ -458,7 +510,7 @@ private:
       phase, t_, s_y.norm(), e_y.norm(), cond_J,
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
-    // 14. Registro CSV (solo fase SMC, sin transicion quintica)
+    // 15. Registro CSV (solo fase SMC, sin transicion quintica)
     if (!in_trans && csv_.is_open()) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
@@ -470,10 +522,11 @@ private:
            << ',' << s_y[0]         << ',' << s_y[1]         << ',' << s_y[2]         << ',' << s_y[3]
            << ',' << tau_sat[0]     << ',' << tau_sat[1]     << ',' << tau_sat[2]     << ',' << tau_sat[3]
            << ',' << cond_J
+           << ',' << z_[0]          << ',' << z_[1]          << ',' << z_[2]          << ',' << z_[3]
            << '\n';
     }
 
-    t_ += 0.005;
+    t_ += DT;
 
     if (t_run_ > 0.0 && t_ >= T_TRANS + t_run_) {
       RCLCPP_INFO(this->get_logger(),
@@ -487,6 +540,10 @@ private:
         RCLCPP_INFO(this->get_logger(), "CSV cerrado: %s", csv_path_.c_str());
       }
       timer_->cancel();
+      // Fin de la ejecucion sin Ctrl+C: breve espera para que el torque cero
+      // llegue al controlador de Gazebo y luego se cierra el proceso
+      rclcpp::sleep_for(100ms);
+      rclcpp::shutdown();
     }
   }
 
@@ -504,6 +561,10 @@ private:
 
   Eigen::Vector4d y0_;
   bool            y0_initialized_;
+
+  bool            integral_ = false;
+  Eigen::Vector4d z_ {0.0, 0.0, 0.0, 0.0};   // termino integral [m/s² | rad/s²]
+  bool            tau_saturated_prev_ = false;
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
   omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)

@@ -320,7 +320,7 @@ obstacle_pose: [0.1125, 0.0, 0.0, 0.0, 0.0, 1.5708]  # [x,y,z,r,p,yaw]
 # Plant dynamics scales (used in Sliding Mode robustness tests)
 mass_inertia_scale: 1.0   # 1.2 = +20% mass/inertia perturbation
 damping_scale:      1.0   # 1.1 = +10% viscous damping perturbation
-friction_scale:     0.0   # 0.0 = no friction in simulation
+friction_scale:     1.0   # 1.0 = nominal; the SMC nodes apply the URDF friction feedforward, keep it at 1.0
 
 # Additional end-effector load (used in Sliding Mode load tests)
 spawn_load:    false
@@ -337,10 +337,10 @@ load_x_offset: 0.015   # [m]
 | Feedback Linearization | `true` | `[0,0,0,0]` or free | Nominal plant |
 | TV-LQR Act. 1 | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: false` |
 | TV-LQR Act. 2 | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: true` |
-| SMC Articular | `true` | `[0.0, -0.5, 0.3, 0.785]` | Nominal: `mass_inertia_scale: 1.0` |
-| SMC Articular — incertidumbre | `true` | `[0.0, -0.5, 0.3, 0.785]` | `mass_inertia_scale: 1.2`, `damping_scale: 1.1` |
-| SMC Articular — carga | `true` | `[0.0, -0.5, 0.3, 0.785]` | `spawn_load: true` |
-| SMC Cartesiano | `false` | — | Robot starts at gravity equilibrium |
+| SMC Articular | `true` | `[0.0, 0.91, 0.54, -1.68]` | Nominal: `mass_inertia_scale: 1.0` |
+| SMC Articular — incertidumbre | `true` | `[0.0, 0.91, 0.54, -1.68]` | `mass_inertia_scale: 1.2`, `damping_scale: 1.1` |
+| SMC Articular — carga | `true` | `[0.0, 0.91, 0.54, -1.68]` | `spawn_load: true` |
+| SMC Cartesiano | `true` | `[0.0, 0.91, 0.54, -1.68]` | Same scales and load options as the joint-space node |
 
 ---
 
@@ -530,21 +530,26 @@ Implements SMC in joint space (**Activity 1**) and Cartesian space (**Activity 2
 Launch Gazebo first (Terminal 1), then in **Terminal 2**:
 
 ```bash
+# With sat(s/phi) switching function (default)
+ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student \
+    --ros-args -p test_num:=1 -p t_run:=25.0
+
 # With sign(s) switching function
 ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student \
-    --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
+    --ros-args -p rho_func:=sign -p test_num:=2 -p t_run:=25.0
 
-# With sat(s/phi) switching function
+# With the integral term
 ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student \
-    --ros-args -p rho_func:=sat -p phi:=0.05 -p test_num:=2 -p t_run:=20.0
+    --ros-args -p integral:=true -p test_num:=3 -p t_run:=25.0
 ```
 
 | Parameter | Description |
 |---|---|
-| `rho_func` | Switching function: `sign` or `sat` |
-| `phi` | Boundary layer width (only used when `rho_func:=sat`) |
+| `rho_func` | Switching function: `sat` (default) or `sign` |
+| `phi` | Boundary layer width, default `0.6` (only used when `rho_func:=sat`) |
+| `integral` | Adds the integral term to the reaching law: `true` or `false` (default) |
 | `test_num` | ID appended to output CSV |
-| `t_run` | Simulation duration in seconds |
+| `t_run` | Tracking duration in simulated seconds; the node exits when it ends |
 
 Data saved to: `data/smc/sim/act1/gz_smc_joint_<rho>_<N>.csv`
 
@@ -572,16 +577,18 @@ run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_joint.m')
 
 The node performs a quintic transition of duration `T_trans = 3 s` before the SMC phase. `t_run` refers only to the SMC phase; total runtime = `T_trans + t_run`.
 
-Set `use_fixed_init: false` in `sim_init_config.yaml` so the robot starts at gravity equilibrium.
-
 ```bash
+# With sat(s/phi) (default, phi = 0.2)
+ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student \
+    --ros-args -p test_num:=1 -p t_run:=25.0
+
 # With sign(s)
 ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student \
-    --ros-args -p rho_func:=sign -p test_num:=1 -p t_run:=20.0
+    --ros-args -p rho_func:=sign -p test_num:=2 -p t_run:=25.0
 
-# With sat(s/phi)
+# With the integral term
 ros2 run open_manipulator_x_torque_control gz_smc_cart_node_student \
-    --ros-args -p rho_func:=sat -p phi:=0.25 -p test_num:=2 -p t_run:=20.0
+    --ros-args -p integral:=true -p test_num:=3 -p t_run:=25.0
 ```
 
 Data saved to: `data/smc/sim/act2/gz_smc_cart_<rho>_<N>.csv`

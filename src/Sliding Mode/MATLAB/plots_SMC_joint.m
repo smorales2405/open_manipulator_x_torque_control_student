@@ -7,6 +7,7 @@
 %   Figura 3 — Seguimiento de velocidades articulares dq1..dq4
 %   Figura 4 — Superficies deslizantes                s1..s4
 %   Figura 5 — Torques de control                     tau1..tau4
+%   Figura 6 — Termino integral                       z1..z4 (solo si el nodo corrio con integral:=true)
 %
 %   Metricas reportadas en consola (Tabla 3 de la guia, por articulacion):
 %     e_q,max [rad]  |  e_q,RMS [rad]  |  max|tau| [N·m]  |  tau_RMS [N·m]  |  Sat [%]  |  TV(tau)
@@ -83,6 +84,14 @@ sat    = abs(tau) >= 0.99 * TAU_MAX;   % bandera de saturacion (criterio de la g
 
 e_q    = q - q_des;
 
+% Termino integral z1..z4: vale cero con integral:=false y no existe en los CSV
+% anteriores a ese parametro; la figura de z solo se genera si esta activo
+has_z = all(ismember({'z1','z2','z3','z4'}, T.Properties.VariableNames));
+if has_z
+    z_int = [T.z1, T.z2, T.z3, T.z4];
+    has_z = any(z_int(:) ~= 0);
+end
+
 %% ── Metricas (Tabla 3 de la guia) ───────────────────────────────────────────
 fprintf('\n%s\n', repmat('═', 1, 88));
 fprintf(' Metricas SMC articular  [%s | rho=%s | test=%d]\n', ...
@@ -100,6 +109,10 @@ for i = 1:4
     tv_i      = sum(abs(diff(tau(:,i))));
     fprintf('q%-5d  %12.5f  %12.5f  %14.4f  %14.4f  %10.2f  %10.4f\n', ...
             i, e_max_i, e_rms_i, tau_max_i, tau_rms_i, sat_pct_i, tv_i);
+end
+if has_z
+    fprintf('Termino integral (z converge a menos la perturbacion en aceleracion):\n');
+    fprintf('  z media [rad/s2] = [%.2f %.2f %.2f %.2f]\n', mean(z_int));
 end
 fprintf('%s\n\n', repmat('═', 1, 88));
 
@@ -122,7 +135,11 @@ if isfield(rho_tex, rho_func)
 else
     rho_label = rho_func;
 end
-sub_label = sprintf('[%s | rho = %s]', mode_label, rho_label);
+if has_z
+    sub_label = sprintf('[%s | integral | rho = %s]', mode_label, rho_label);
+else
+    sub_label = sprintf('[%s | rho = %s]', mode_label, rho_label);
+end
 
 %% ── Figura 1 — Seguimiento de posiciones articulares ─────────────────────────
 figure(1); clf;
@@ -240,6 +257,28 @@ end
 title(tl5, sprintf('SMC Articular — Torques de Control  %s', sub_label), ...
       'FontSize', fs_title, 'FontWeight', 'bold');
 
+%% ── Figura 6 — Termino integral ──────────────────────────────────────────────
+if has_z
+    figure(6); clf;
+    set(gcf, 'Color', 'w', 'Position', [150 -500 1100 680]);
+    tl6 = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+    for i = 1:4
+        nexttile(tl6);
+        plot(t, z_int(:,i), '-', 'Color', c_tau(i,:), 'LineWidth', lw); hold on;
+        yline(0, ':', 'LineWidth', 0.9, 'Color', [0.5 0.5 0.5]);
+        xlabel('Tiempo [s]', 'FontSize', fs);
+        ylabel(sprintf('$z_%d$ [rad/s$^2$]', i), 'Interpreter', 'latex', 'FontSize', fs);
+        title(jointNames{i}, 'FontSize', fs_title - 2);
+        grid on; box on;
+        set(gca, 'FontSize', fs);
+        xlim(xlims);
+    end
+
+    title(tl6, sprintf('SMC Articular — Termino Integral  %s', sub_label), ...
+          'FontSize', fs_title, 'FontWeight', 'bold');
+end
+
 %% ── Exportacion ──────────────────────────────────────────────────────────────
 if EXPORT_FIGS
     if ~exist(output_dir, 'dir')
@@ -259,6 +298,11 @@ if EXPORT_FIGS
     exportgraphics(figure(3), fullfile(output_dir, 'plot_dq_tracking.eps'), 'ContentType', 'vector', 'Resolution', 600);
     exportgraphics(figure(4), fullfile(output_dir, 'plot_surfaces.eps'),    'ContentType', 'vector', 'Resolution', 600);
     exportgraphics(figure(5), fullfile(output_dir, 'plot_torques.eps'),     'ContentType', 'vector', 'Resolution', 600);
+
+    if has_z
+        exportgraphics(figure(6), fullfile(output_dir, 'plot_integral.png'), 'Resolution', 300);
+        exportgraphics(figure(6), fullfile(output_dir, 'plot_integral.eps'), 'ContentType', 'vector', 'Resolution', 600);
+    end
 
     fprintf('Graficas guardadas en:\n  %s\n', output_dir);
 end
