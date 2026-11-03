@@ -37,7 +37,8 @@ clear; clc; close all;
 T_SIM       = 20.0;    % [s] duracion de la simulacion 
 ANIM_MODE   = 'off';   % 'post' | 'live' | 'off'  
 
-EXPORT_FIGS = false;   % true = guardar PNG (300 dpi) en plots/ junto al script
+EXPORT_FIGS = false;   % true = guardar PNG (300 dpi) y EPS vectorial (600 dpi) en
+                       %        plots/ junto al script
 
 Ts          = 1/200;   % [s] periodo del lazo de control (200 Hz)
 T_REG       = 1.0;     % [s] ventana excluida de las metricas: transitorio
@@ -49,7 +50,8 @@ Fv = 0.001 * ones(4,1);   % Damping Friction [N·m·s/rad]
 Fc = 0.05  * ones(4,1);   % Coulomb Friction [N·m] igual 
 F_eps    = 0.05;    % [rad/s] suavizado del tanh en el feedforward de Coulomb
 eps_plant    = 0.01;   % [rad/s] suavizado del sign() de Coulomb en la planta
-N_SUB        = 5;      % subpasos RK4 por tick (h = Ts/N_SUB = 1 ms)
+N_SUB        = 100;    % subpasos RK4 por tick (h = Ts/N_SUB = 0.05 ms). Coulomb es rigido
+                       % cerca de dq = 0 y RK4 necesita N_SUB >= 46 para ser estable
 
 % Limites articulares del URDF 
 Q_LOWER = [-2.3562; -1.9199; -1.9199; -1.8];
@@ -290,10 +292,18 @@ sgtitle(sprintf('[%s] Feedback Linearization - Torques de control calculados', m
 if EXPORT_FIGS
     output_dir = fullfile(this_dir, 'plots');
     if ~exist(output_dir, 'dir'), mkdir(output_dir); end
+
+    % PNG (raster, 300 dpi)
+    exportgraphics(figure(1), fullfile(output_dir, 'tracking_plot_q.png'),     'Resolution', 300);
+    exportgraphics(figure(2), fullfile(output_dir, 'tracking_plot_error.png'), 'Resolution', 300);
+    exportgraphics(figure(3), fullfile(output_dir, 'torques_plot.png'),        'Resolution', 300);
+
+    % EPS (vectorial, 600 dpi)
     exportgraphics(figure(1), fullfile(output_dir, 'tracking_plot_q.eps'),     'ContentType', 'vector', 'Resolution', 600);
     exportgraphics(figure(2), fullfile(output_dir, 'tracking_plot_error.eps'), 'ContentType', 'vector', 'Resolution', 600);
     exportgraphics(figure(3), fullfile(output_dir, 'torques_plot.eps'),        'ContentType', 'vector', 'Resolution', 600);
 
+    % Vista 3D solo en PNG: en EPS vectorial, con las mallas STL, son ~43 MB y ~2.5 min
     if ~isempty(H) && isvalid(H.fig)
         exportgraphics(H.fig, fullfile(output_dir, 'robot3d_final.png'), 'Resolution', 300);
     end
