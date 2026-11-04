@@ -30,6 +30,14 @@
 //  Y aceleracion con la trayectoria (empalme C2). El CSV registra solo la
 //  fase de seguimiento.
 //
+//  Fases (con t_run = 0 no hay limite ni retorno):
+//    [0, T_TRANS)                     transicion quintica hasta q_d(0)
+//    [T_TRANS, T_TRANS+t_run)         seguimiento de la trayectoria
+//    [T_TRANS+t_run, +RETURN_TIME_S)  retorno quintico al reposo en la pose inicial
+//    [..., +HOLD_TIME_S)              pausa en reposo; luego torque cero y fin
+//  El retorno deja el robot en la pose de partida, asi que se puede volver a
+//  ejecutar el nodo sobre el mismo Gazebo sin relanzarlo.
+//
 //  Lazo de control: 200 Hz de tiempo simulado (Ts = 5 ms). El nodo usa el reloj
 //  de Gazebo (use_sim_time=true): t_run y el CSV quedan en segundos simulados.
 //
@@ -39,7 +47,8 @@
 //  Parametros ROS 2 (--ros-args -p nombre:=valor):
 //    test_num  [int]     1       — identificador del CSV generado
 //    t_run     [double]  0.0     — duracion del seguimiento en segundos
-//                                  (0 = ilimitado); total = T_TRANS + t_run.
+//                                  (0 = ilimitado, sin retorno); total =
+//                                  T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S.
 //                                  Al terminar, el nodo se cierra solo.
 //    rho_func  [string]  "sat"   — funcion de conmutacion: "sat" | "sign"
 //    phi       [double]  0.6     — capa limite para sat(s/phi)  [rad/s]
@@ -109,6 +118,10 @@ static constexpr double FRIC_EPS = 0.05;  // [rad/s]
 // Duracion de la transicion quintica desde la pose medida hasta q_d(0)
 // (no modificar)
 static constexpr double T_TRANS = 3.0;   // [s]
+// Duraciones del retorno final a la pose inicial y de la pausa en reposo antes
+// de soltar el torque (no modificar)
+static constexpr double RETURN_TIME_S = 3.0;   // [s]
+static constexpr double HOLD_TIME_S   = 0.5;   // [s]
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  [SECCION 3] GANANCIAS SMC — COMPLETAR
@@ -291,8 +304,8 @@ public:
       FRIC_EPS);
     if (t_run_ > 0.0) {
       RCLCPP_INFO(this->get_logger(),
-        "t_run (seguimiento) = %.1f s  |  total = %.1f s (T_trans=%.1f + t_run=%.1f)",
-        t_run_, T_TRANS + t_run_, T_TRANS, t_run_);
+        "t_run (seguimiento) = %.1f s  |  total = %.1f s (T_trans=%.1f + t_run=%.1f + retorno=%.1f + pausa=%.1f)",
+        t_run_, T_TRANS + t_run_ + RETURN_TIME_S + HOLD_TIME_S, T_TRANS, t_run_, RETURN_TIME_S, HOLD_TIME_S);
     } else {
       RCLCPP_INFO(this->get_logger(), "t_run = ilimitado  (T_trans=%.1f s)", T_TRANS);
     }
@@ -355,7 +368,8 @@ private:
 
     // Captura de la pose inicial (el brazo pudo caer por gravedad antes de
     // arrancar el nodo) + referencia segun fase: transicion quintica con
-    // empalme C2 hacia q_d(0), luego trayectoria de seguimiento.
+    // empalme C2 hacia q_d(0), trayectoria de seguimiento, retorno quintico a la
+    // pose inicial y pausa en reposo.
     // (Infraestructura, no modificar)
     if (!q0_initialized_) {
       q0_ = q;
@@ -366,10 +380,26 @@ private:
     }
 
     const Reference goal0 = desiredTrajectory(0.0);
-    const bool in_trans   = (t_ < T_TRANS);
-    const Reference ref   = in_trans
-      ? omx::quinticTransition(t_, T_TRANS, q0_, goal0)
-      : desiredTrajectory(t_ - T_TRANS);
+    const bool in_trans    = (t_ < T_TRANS);
+    const bool in_tracking = !in_trans && (t_run_ <= 0.0 || t_ < T_TRANS + t_run_);
+    Reference ref;
+    if (in_trans) {
+      ref = omx::quinticTransition(t_, T_TRANS, q0_, goal0);
+    } else if (in_tracking) {
+      ref = desiredTrajectory(t_ - T_TRANS);
+    } else if (t_ < T_TRANS + t_run_ + RETURN_TIME_S) {
+      if (!return_logged_) {
+        RCLCPP_INFO(this->get_logger(),
+          "Iniciando retorno quintico a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
+        return_logged_ = true;
+      }
+      ref = omx::quinticReturn(t_ - (T_TRANS + t_run_), RETURN_TIME_S,
+                               desiredTrajectory(t_run_), q0_);
+    } else {
+      ref.q = q0_;
+      ref.dq.setZero();
+      ref.ddq.setZero();
+    }
 
     // ── Dinamica nominal via Pinocchio ─────────────────────────────────────
 
@@ -424,14 +454,16 @@ private:
     cmd.data.assign(tau_sat.data(), tau_sat.data() + NARM);
     torque_pub_->publish(cmd);
 
-    const char * phase = in_trans ? "TRANS" : "TRAY ";
+    const char * phase = in_trans    ? "TRANS" :
+                         in_tracking ? "TRAY " :
+                         (t_ < T_TRANS + t_run_ + RETURN_TIME_S) ? "RET  " : "HOME ";
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
       "[%s] t=%.2fs  |s|=%.4f  |e|=%.4f rad  tau=[%.3f %.3f %.3f %.3f] N·m",
       phase, t_, s_q.norm(), e_q.norm(),
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
-    // ── Registro CSV (solo fase de seguimiento, sin transicion quintica) ───
-    if (!in_trans && csv_.is_open()) {
+    // ── Registro CSV (solo fase de seguimiento, sin transicion, retorno ni pausa)
+    if (in_tracking && csv_.is_open()) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
            << ',' << q[0]       << ',' << q[1]       << ',' << q[2]       << ',' << q[3]
@@ -446,10 +478,11 @@ private:
 
     t_ += DT;
 
-    if (t_run_ > 0.0 && t_ >= T_TRANS + t_run_) {
+    // Fin: tras el retorno y la pausa en reposo se suelta el torque (el robot
+    // queda en la pose de partida, listo para otra ejecucion)
+    if (t_run_ > 0.0 && t_ >= T_TRANS + t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
       RCLCPP_INFO(this->get_logger(),
-        "Simulacion completada: T_trans=%.1f s + t_run=%.1f s = %.1f s total. Deteniendo control.",
-        T_TRANS, t_run_, T_TRANS + t_run_);
+        "Retorno a q_inicial completado (t=%.1f s). Deteniendo control.", t_);
       std_msgs::msg::Float64MultiArray zero;
       zero.data.assign(NARM, 0.0);
       torque_pub_->publish(zero);
@@ -473,6 +506,7 @@ private:
 
   Eigen::Vector4d q0_ {0.0, 0.0, 0.0, 0.0};  // pose medida al arrancar
   bool            q0_initialized_ = false;
+  bool            return_logged_ = false;
 
   double      t_;
   double      t_run_;

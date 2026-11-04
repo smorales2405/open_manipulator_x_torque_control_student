@@ -226,7 +226,7 @@ open_manipulator_x_torque_control/
 │   ├── robot_model.hpp           # Pinocchio wrapper: M(q), n(q,dq), g(q), RNEA, EE kinematics, Slotine-Li
 │   ├── dynamixel_io.hpp          # Control table, units, calibration, block state read
 │   ├── dynamixel_arm.hpp         # Port/servo setup, read state, write currents, safe shutdown
-│   ├── joint_return.hpp          # Joint-space final return (PD + gravity compensation) for the IO nodes
+│   ├── joint_return.hpp          # Joint-space final return (PD + gravity compensation) for the FL, IO and hw_SMC nodes
 │   ├── motor_model.hpp           # Motor model, HW limits and torque→current conversion (motor YAML)
 │   ├── trajectory.hpp            # Quintic transition/return/blend/profile (joint and Cartesian)
 │   ├── ros_utils.hpp             # Motor-YAML node options, CSV logging, /joint_states listener
@@ -549,7 +549,7 @@ ros2 run open_manipulator_x_torque_control gz_smc_joint_node_student \
 | `phi` | Boundary layer width, default `0.6` (only used when `rho_func:=sat`) |
 | `integral` | Adds the integral term to the reaching law: `true` or `false` (default) |
 | `test_num` | ID appended to output CSV |
-| `t_run` | Tracking duration in simulated seconds; the node exits when it ends |
+| `t_run` | Tracking duration in simulated seconds; the node then returns to the initial pose and exits |
 
 Data saved to: `data/smc/sim/act1/gz_smc_joint_<rho>_<N>.csv`
 
@@ -575,7 +575,7 @@ run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_joint.m')
 
 #### Activity 2 — Cartesian SMC
 
-The node performs a quintic transition of duration `T_trans = 3 s` before the SMC phase. `t_run` refers only to the SMC phase; total runtime = `T_trans + t_run`.
+The node performs a quintic transition of duration `T_trans = 3 s` before the SMC phase. `t_run` refers only to the SMC phase; total runtime = `T_trans + t_run` plus 3.5 s for the final return to the initial pose.
 
 ```bash
 # With sat(s/phi) (default, phi = 0.2)
