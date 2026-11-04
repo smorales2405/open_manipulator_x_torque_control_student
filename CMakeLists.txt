@@ -41,6 +41,7 @@ add_library(omx_common STATIC
   src/Common/dynamixel_io.cpp
   src/Common/dynamixel_arm.cpp
   src/Common/motor_model.cpp
+  src/Common/initial_pose.cpp
   src/Common/ros_utils.cpp)
 target_include_directories(omx_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 ament_target_dependencies(omx_common PUBLIC rclcpp sensor_msgs dynamixel_sdk)

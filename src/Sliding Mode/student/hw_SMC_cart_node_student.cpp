@@ -70,11 +70,11 @@
  * modo 'real' descarta t < T_TRANS para que las metricas sean solo de
  * seguimiento. El retorno y la pausa final NO se guardan en el CSV.
  *
- * PROCEDIMIENTO DE ARRANQUE: posicionar el brazo a mano cerca de Y_START
- * (codo arriba, efector a ~0.20 m y ~0.13 m de altura) antes de lanzar el
- * nodo. Arrancar desde la pose de reposo caida (brazo extendido-bajo) exige
- * levantar el brazo extendido contra gravedad+stiction durante la
- * transicion y fue la causa de la divergencia del test1 hw.
+ * ARRANQUE: el control inicia solo con el robot en la posicion articular inicial
+ * de config/hw_initial_pose.yaml (omx::waitForInitialPose); fuera de ese rango el
+ * nodo muestra donde colocarlo y espera ENTER. La transicion levanta el brazo desde
+ * esa pose contra gravedad+stiction, que fue lo que divergio en el test1 hw: usar
+ * gain_scale:=0.5 en el primer ensayo.
  *
  * Guardas de altura mínima (placa metálica de la base):
  *   La referencia y el efector medido nunca pueden bajar de Z_MIN_FLOOR
@@ -117,8 +117,7 @@
  *
  * Publisher: /hw/joint_states (sensor_msgs/JointState) — monitoreo
  *
- * Ejemplos de ejecucion (primer run SIEMPRE con gain_scale:=0.5 y el brazo
- * pre-posicionado a mano cerca de Y_START):
+ * Ejemplos de ejecucion (primer run SIEMPRE con gain_scale:=0.5):
  *   # SMC clasico:
  *   ros2 run open_manipulator_x_torque_control hw_smc_cart_node_student \
  *     --ros-args -p gain_scale:=0.5 -p test_num:=1 -p t_run:=30.0
@@ -150,6 +149,7 @@
 #include <Eigen/SVD>
 
 #include "omx/dynamixel_arm.hpp"
+#include "omx/initial_pose.hpp"
 #include "omx/joint_return.hpp"
 #include "omx/motor_model.hpp"
 #include "omx/robot_model.hpp"
@@ -395,6 +395,22 @@ public:
     }
     RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d  frame='%s'", model_.nv(), EFF_FRAME_NAME);
 
+    // ── Publisher de monitoreo ────────────────────────────────────────────────
+    js_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/hw/joint_states", 10);
+
+    // ── SDK ──────────────────────────────────────────────────────────────────
+    if (!arm_.open(port_name_, hw_.calib, hw_.limits.current_limit_register)) {
+      RCLCPP_FATAL(get_logger(), "Fallo hardware init. Abortando.");
+      throw std::runtime_error("Hardware init failed");
+    }
+
+    // ── Posicion articular inicial (config/hw_initial_pose.yaml) ─────────────
+    // Espera a que el robot este en su posicion inicial. El CSV se abre despues:
+    // salir aqui con Ctrl+C no borra un CSV anterior con el mismo numero de prueba.
+    if (!omx::waitForInitialPose(*this, arm_)) {
+      return;
+    }
+
     // ── CSV ──────────────────────────────────────────────────────────────────
     csv_path_ = std::string(PACKAGE_DATA_DIR) + "/smc/real/act2/hw_smc_cart_sat_"
                 + std::to_string(test_num) + ".csv";
@@ -413,15 +429,6 @@ public:
       "curr_meas1,curr_meas2,curr_meas3,curr_meas4,"
       "z1,z2,z3,z4",
       get_logger());
-
-    // ── Publisher de monitoreo ────────────────────────────────────────────────
-    js_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/hw/joint_states", 10);
-
-    // ── SDK ──────────────────────────────────────────────────────────────────
-    if (!arm_.open(port_name_, hw_.calib, hw_.limits.current_limit_register)) {
-      RCLCPP_FATAL(get_logger(), "Fallo hardware init. Abortando.");
-      throw std::runtime_error("Hardware init failed");
-    }
 
     // ── Timer de control (loop_rate_hz) ──────────────────────────────────────
     start_time_ = std::chrono::high_resolution_clock::now();
@@ -858,7 +865,10 @@ int main(int argc, char* argv[])
   const rclcpp::NodeOptions opts = omx::motorParamsNodeOptions(argc, argv, "hw_smc_cart_node");
 
   try {
-    rclcpp::spin(std::make_shared<HWSMCCartNode>(opts));
+    auto node = std::make_shared<HWSMCCartNode>(opts);
+    if (rclcpp::ok()) {   // false: Ctrl+C durante la espera de la posicion inicial
+      rclcpp::spin(node);
+    }
   } catch (const std::exception& e) {
     RCLCPP_FATAL(rclcpp::get_logger("hw_smc_cart_node"), "Excepcion: %s", e.what());
     rclcpp::shutdown();

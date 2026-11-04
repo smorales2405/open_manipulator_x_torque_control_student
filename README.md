@@ -29,8 +29,9 @@ Implemented controllers: **Feedback Linearization** (joint-space and Cartesian),
    - [Feedback Linearization](#feedback-linearization)
    - [Trajectory Optimization and TV-LQR](#trajectory-optimization-and-tv-lqr)
    - [Sliding Mode Control](#sliding-mode-control)
-6. [Real Hardware — USB Latency](#real-hardware--usb-latency)
-7. [Data and Plots](#data-and-plots)
+6. [Real Hardware — Initial Position](#real-hardware--initial-position)
+7. [Real Hardware — USB Latency](#real-hardware--usb-latency)
+8. [Data and Plots](#data-and-plots)
 
 ---
 
@@ -218,6 +219,7 @@ open_manipulator_x_torque_control/
 │   ├── effort_controllers.yaml       # ros2_control effort controller config
 │   ├── motor_params.yaml             # Dynamixel motor parameters for real HW
 │   ├── motorXM430W350T_params.yaml   # Identified torque→current model (assembled final)
+│   ├── hw_initial_pose.yaml      # Initial joint range required by the FL and SMC hw_ nodes
 │   ├── hw_sinusoidal_torque_params.yaml  # Sinusoidal excitation parameters
 │   ├── hw_friction_sweep_params.yaml     # Constant-velocity friction sweep parameters
 │   ├── fkin_params.yaml              # Forward kinematics display parameters
@@ -226,6 +228,7 @@ open_manipulator_x_torque_control/
 │   ├── robot_model.hpp           # Pinocchio wrapper: M(q), n(q,dq), g(q), RNEA, EE kinematics, Slotine-Li
 │   ├── dynamixel_io.hpp          # Control table, units, calibration, block state read
 │   ├── dynamixel_arm.hpp         # Port/servo setup, read state, write currents, safe shutdown
+│   ├── initial_pose.hpp          # Initial joint position check of the FL and SMC hw_ nodes
 │   ├── joint_return.hpp          # Joint-space final return (PD + gravity compensation) for the FL, IO and hw_SMC nodes
 │   ├── motor_model.hpp           # Motor model, HW limits and torque→current conversion (motor YAML)
 │   ├── trajectory.hpp            # Quintic transition/return/blend/profile (joint and Cartesian)
@@ -608,6 +611,17 @@ run('src/Sliding Mode/MATLAB/plots_SMC_comp_sf_cart.m')
 robustness_test = 'load';  % 'params' or 'load'
 run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_cart.m')
 ```
+
+---
+
+## Real Hardware — Initial Position
+
+The `hw_` nodes of Feedback Linearization and SMC start only with the robot in the initial joint range set in `config/hw_initial_pose.yaml`:
+
+- **Inside the range:** the control starts automatically.
+- **Outside the range:** the node shows the current position and the allowed range, and waits with zero current. Move the robot by hand and press ENTER to start. If it is still outside, the node warns again and keeps waiting; Ctrl+C exits.
+
+After the final return, the robot may need to be placed again before the next run. To change the range, edit `initial_q_min`, `initial_q_max` and `initial_q_margin` in that file; no rebuild is needed. Run these nodes with `ros2 run` in a terminal, so they can read ENTER.
 
 ---
 

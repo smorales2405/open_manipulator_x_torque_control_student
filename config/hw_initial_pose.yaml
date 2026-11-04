@@ -1,0 +1,23 @@
+# Posicion articular inicial de los nodos hw_ de Feedback Linearization y SMC
+# (omx::waitForInitialPose). Cada nodo lo lee al arrancar: al editar este archivo
+# no hace falta recompilar.
+#
+# El control inicia si, en todas las articulaciones,
+#   initial_q_min - initial_q_margin <= q <= initial_q_max + initial_q_margin
+# Si no, el nodo muestra la posicion actual y el rango, y espera con corriente cero
+# a que el robot se coloque a mano y se presione ENTER.
+#
+# Poses de reposo medidas en el robot [rad]:
+#   Con espuma de ~1 cm:  [ 0.0046  0.8498  0.5706  -1.5723]
+#                         [-0.0015  0.9311  0.1933  -1.2487]
+#   Sin espuma:           [ 0.0031  0.9081  0.5921  -1.6659]  J4 fuera de rango: hay que subirlo
+#                         [ 0.0046  0.9879  0.1488  -1.2640]
+#
+# J4 va de -pi/2 a -1.25, lejos de su limite articular de -1.80. Su margen de 5 mrad
+# deja pasar las dos poses con espuma, que estan a 1-2 mrad de esos valores.
+/**:
+  ros__parameters:
+    #                    J1      J2      J3       J4
+    initial_q_min:    [0.000,  0.850,  0.150,  -1.5708]
+    initial_q_max:    [0.000,  0.990,  0.590,  -1.2500]
+    initial_q_margin: [0.050,  0.050,  0.050,   0.0050]

@@ -36,6 +36,10 @@
  *   - Publicador /hw/joint_states y escritura de CSV (el retorno final y la
  *     pausa en reposo no se registran en el CSV)
  *
+ * Arranque: el control inicia solo con el robot en la posicion articular inicial
+ * de config/hw_initial_pose.yaml (omx::waitForInitialPose); fuera de ese rango el
+ * nodo muestra donde colocarlo y espera ENTER.
+ *
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
  *   port_name              [string]   "/dev/ttyUSB0"
  *   gain_scale             [double]   1.0    (escala de ganancias)
@@ -75,6 +79,7 @@
 #include <Eigen/LU>
 
 #include "omx/dynamixel_arm.hpp"
+#include "omx/initial_pose.hpp"
 #include "omx/joint_return.hpp"
 #include "omx/motor_model.hpp"
 #include "omx/robot_model.hpp"
@@ -235,6 +240,22 @@ public:
     }
     RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d  frame='%s'", model_.nv(), EFF_FRAME_NAME);
 
+    // ── Publisher de monitoreo ────────────────────────────────────────────────
+    js_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/hw/joint_states", 10);
+
+    // ── SDK ──────────────────────────────────────────────────────────────────
+    if (!arm_.open(port_name_, hw_.calib, hw_.limits.current_limit_register)) {
+      RCLCPP_FATAL(get_logger(), "Fallo hardware init. Abortando.");
+      throw std::runtime_error("Hardware init failed");
+    }
+
+    // ── Posicion articular inicial (config/hw_initial_pose.yaml) ─────────────
+    // Espera a que el robot este en su posicion inicial. El CSV se abre despues:
+    // salir aqui con Ctrl+C no borra un CSV anterior con el mismo numero de prueba.
+    if (!omx::waitForInitialPose(*this, arm_)) {
+      return;
+    }
+
     // ── CSV ──────────────────────────────────────────────────────────────────
     csv_path_ = std::string(PACKAGE_DATA_DIR) + "/feedback_linearization/real/act2/hw_io_data_"
                 + std::to_string(test_num) + ".csv";
@@ -249,15 +270,6 @@ public:
       "curr_meas1,curr_meas2,curr_meas3,curr_meas4,"
       "det_J4",
       get_logger());
-
-    // ── Publisher de monitoreo ────────────────────────────────────────────────
-    js_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/hw/joint_states", 10);
-
-    // ── SDK ──────────────────────────────────────────────────────────────────
-    if (!arm_.open(port_name_, hw_.calib, hw_.limits.current_limit_register)) {
-      RCLCPP_FATAL(get_logger(), "Fallo hardware init. Abortando.");
-      throw std::runtime_error("Hardware init failed");
-    }
 
     // ── Timer de control (loop_rate_hz) ──────────────────────────────────────
     start_time_ = std::chrono::high_resolution_clock::now();
@@ -634,7 +646,10 @@ int main(int argc, char* argv[])
   const rclcpp::NodeOptions opts = omx::motorParamsNodeOptions(argc, argv, "hw_io_control_node");
 
   try {
-    rclcpp::spin(std::make_shared<HWIOControlNode>(opts));
+    auto node = std::make_shared<HWIOControlNode>(opts);
+    if (rclcpp::ok()) {   // false: Ctrl+C durante la espera de la posicion inicial
+      rclcpp::spin(node);
+    }
   } catch (const std::exception& e) {
     RCLCPP_FATAL(rclcpp::get_logger("hw_io_control_node"), "Excepcion: %s", e.what());
     rclcpp::shutdown();

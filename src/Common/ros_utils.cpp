@@ -22,6 +22,11 @@ rclcpp::NodeOptions motorParamsNodeOptions(int argc, char ** argv, const std::st
     }
     args.push_back("--params-file");
     args.push_back(cfg);
+    const auto initial_pose = std::filesystem::path(cfg).parent_path() / "hw_initial_pose.yaml";
+    if (std::filesystem::exists(initial_pose)) {
+      args.push_back("--params-file");
+      args.push_back(initial_pose.string());
+    }
     opts.arguments(args);
     opts.use_global_arguments(false);
     RCLCPP_INFO(rclcpp::get_logger(node_name), "motorXM430W350T_params auto-cargado: %s", cfg.c_str());

@@ -13,10 +13,10 @@
 namespace omx
 {
 
-// Opciones del nodo con config/motorXM430W350T_params.yaml auto-cargado. El YAML
-// va al final: sus parametros tienen prioridad sobre los -p de la linea de
-// comandos; los parametros propios del nodo (no presentes en el YAML) si se
-// ajustan con -p.
+// Opciones del nodo con config/motorXM430W350T_params.yaml y config/hw_initial_pose.yaml
+// auto-cargados. Los YAML van al final: sus parametros tienen prioridad sobre los -p
+// de la linea de comandos; los parametros propios del nodo (no presentes en los YAML)
+// si se ajustan con -p.
 rclcpp::NodeOptions motorParamsNodeOptions(int argc, char ** argv, const std::string & node_name);
 
 // Crea la carpeta, abre el CSV y escribe el encabezado (sin '\n' final).
