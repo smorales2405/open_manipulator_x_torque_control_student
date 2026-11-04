@@ -1,16 +1,27 @@
-// Retorno final en espacio articular para los nodos de control cartesiano (IO).
+// Retorno final en espacio articular para los nodos FL, IO y hw_SMC (los nodos
+// gz_SMC conservan su propia ley; ver la nota sobre g(q) mas abajo).
 //
-// Al cumplirse t_run el nodo deja de seguir su referencia cartesiana y lleva el
-// brazo en reposo a la pose articular inicial: quintica articular desde el
-// estado medido al empezar el retorno y PD articular con compensacion de
-// gravedad (g del URDF):
+// Al cumplirse t_run el nodo deja de seguir su referencia y lleva el brazo en
+// reposo a la pose articular inicial: quintica articular desde la pose medida al
+// empezar el retorno y PD articular con compensacion de gravedad (g del URDF):
 //   tau = g(q) + Kp·(q_ref − q) + Kd·(dq_ref − dq)
+//
+// La quintica parte en reposo y el PD frena la velocidad que traia el brazo. Si
+// heredara esa velocidad v0, el recorrido se alargaria ≈ 0.18·v0·T antes de volver,
+// y una rafaga de velocidad al cumplirse t_run llevaria la referencia hasta la
+// guarda de altura minima (visto en hw_SMC_cart contra la planta simulada, T = 5 s).
 //
 // Por que articular: en un retorno cartesiano la muneca (J4) no tiene
 // referencia propia y compensa los errores de J2/J3 para sostener
 // phi = q2 + q3 + q4. Con la pose inicial cerca del limite de J4 (brazo plegado
 // en reposo, J4 ≈ −1.70 rad con limite −1.80) el sobrepaso al llegar disparaba
 // la parada por limites articulares en el robot real.
+//
+// g(q) es nominal: una carga o un error de masa que el modelo no ve deja un
+// error estatico ≈ Δg/Kp. Con las ganancias de hardware es de centesimas de rad.
+// Con las de simulacion, por sus Kp bajos en J3/J4, 125 g hacen caer J3 ~0.45 rad
+// y la carga toca la base (medido en gz_SMC_joint, Parte C): por eso esos nodos no
+// lo usan.
 //
 // Ganancias por plataforma (forHardware / forSimulation): con un PD de
 // ganancias constantes, el lazo discreto de 200 Hz es estable solo si
@@ -57,10 +68,11 @@ public:
   // Pose articular a la que vuelve el brazo (la medida en el primer tick)
   void setHome(const Vec4 & q_home) { q_home_ = q_home; }
 
-  // Primer tick del retorno: la quintica parte del estado medido, sin salto de error
-  void start(const Vec4 & q, const Vec4 & dq)
+  // Primer tick del retorno: la quintica parte en reposo de la pose medida, sin
+  // salto de posicion
+  void start(const Vec4 & q)
   {
-    start_ = Reference{q, dq, Vec4::Zero()};
+    start_ = Reference{q, Vec4::Zero(), Vec4::Zero()};
     started_ = true;
   }
   bool started() const { return started_; }

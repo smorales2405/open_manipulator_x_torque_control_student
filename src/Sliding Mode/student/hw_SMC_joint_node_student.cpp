@@ -50,13 +50,14 @@
  * Fases temporales completas (ver constantes T_TRANS/RETURN_TIME_S/HOLD_TIME_S):
  *   [0, T_TRANS)                                  transicion quintica a q_d(0)
  *   [T_TRANS, T_TRANS+t_run)                      seguimiento periodico
- *   [T_TRANS+t_run, T_TRANS+t_run+RETURN_TIME_S)  retorno quintico a q_inicial
+ *   [T_TRANS+t_run, T_TRANS+t_run+RETURN_TIME_S)  retorno articular a q_inicial
  *   [...+RETURN_TIME_S, ...+HOLD_TIME_S)          pausa en reposo (asienta)
  *   >= ...+RETURN_TIME_S+HOLD_TIME_S              corte de corriente y fin
  * El retorno evita que el brazo caiga por gravedad al recibir torque cero
  * de golpe en medio de la trayectoria (t_run<=0 desactiva el retorno: corre
- * indefinidamente). El CSV registra la transicion inicial + el seguimiento
- * (en hardware las fallas suelen ocurrir en la transicion); plots_SMC_joint.m
+ * indefinidamente). Es infraestructura (omx::JointReturn): no usa la ley de
+ * control de la SECCION 4 ni gain_scale. El CSV registra la transicion inicial +
+ * el seguimiento (en hardware las fallas suelen ocurrir en la transicion); plots_SMC_joint.m
  * en modo 'real' descarta t < T_TRANS para que las metricas sean solo de
  * seguimiento. El retorno y la pausa final NO se guardan en el CSV.
  *
@@ -115,6 +116,7 @@
 #include <Eigen/Dense>
 
 #include "omx/dynamixel_arm.hpp"
+#include "omx/joint_return.hpp"
 #include "omx/motor_model.hpp"
 #include "omx/robot_model.hpp"
 #include "omx/ros_utils.hpp"
@@ -141,7 +143,7 @@ static constexpr int    NUM_JOINTS = 4;
 
 // Duracion de la transicion quintica desde la pose medida hasta q_d(0)
 static constexpr double T_TRANS = 3.0;   // [s]
-static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno quintico a q_inicial
+static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno articular a q_inicial
 static constexpr double HOLD_TIME_S   = 0.5;   // pausa en reposo antes de cortar corriente
 
 using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
@@ -504,32 +506,31 @@ private:
     // 2. Captura posición inicial (primer tick)
     if (!q_initial_captured_) {
       q_initial_ = q;
+      ret_.setHome(q);   // pose articular a la que vuelve el retorno final
       q_initial_captured_ = true;
       RCLCPP_INFO(get_logger(), "q_inicial=[%.3f %.3f %.3f %.3f] rad",
         q(0), q(1), q(2), q(3));
     }
 
     // 3. Referencia: transicion quintica C2 hacia q_d(0), seguimiento, y
-    //    retorno quintico final + pausa en reposo (ver RETURN_TIME_S/HOLD_TIME_S)
+    //    retorno articular final + pausa en reposo (ver RETURN_TIME_S/HOLD_TIME_S)
     const Reference goal0 = desiredTrajectory(0.0);
     const bool in_trans    = (t < T_TRANS);
     const bool in_tracking = !in_trans && (t_run_ <= 0.0 || t < T_TRANS + t_run_);
+    const bool returning   = !in_trans && !in_tracking;
     Reference ref;
     if (in_trans) {
       ref = omx::quinticTransition(t, T_TRANS, q_initial_, goal0);
     } else if (in_tracking) {
       ref = desiredTrajectory(t - T_TRANS);
-    } else if (t < T_TRANS + t_run_ + RETURN_TIME_S) {
-      if (!return_logged_) {
-        RCLCPP_INFO(get_logger(), "Iniciando retorno quintico a q_inicial (t=%.1fs, dur=%.1fs)",
-          t, RETURN_TIME_S);
-        return_logged_ = true;
-      }
-      ref = omx::quinticReturn(t - (T_TRANS + t_run_), RETURN_TIME_S, desiredTrajectory(t_run_), q_initial_);
     } else {
-      ref.q = q_initial_;
-      ref.dq.setZero();
-      ref.ddq.setZero();
+      // Quintica desde la pose medida en t_run hasta q_inicial en reposo
+      if (!ret_.started()) {
+        ret_.start(q);
+        RCLCPP_INFO(get_logger(), "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)",
+          t, RETURN_TIME_S);
+      }
+      ref = ret_.reference(t - (T_TRANS + t_run_));
     }
 
     // 4. Verificar límites: referencia y estado medido
@@ -545,10 +546,13 @@ private:
       }
     }
 
-    // 5. Ley de control — usa dq_hat_ para reducir chattering por ruido de encoder
+    // 5. Ley de control — usa dq_hat_ para reducir chattering por ruido de encoder.
+    //    En el retorno final el par lo da el retorno articular a q_inicial (la
+    //    ley SMC se evalua igual, pero su par se descarta).
     Vec4 s_q;
     const bool integrate = integral_ && (in_trans || in_tracking);
-    const Vec4 tau_unsat = compute_torque(q, dq_hat_, ref, integrate, s_q);
+    const Vec4 tau_smc   = compute_torque(q, dq_hat_, ref, integrate, s_q);
+    const Vec4 tau_unsat = returning ? Vec4(ret_.torque(model_, q, dq_hat_, ref)) : tau_smc;
     const Vec4 tau = tau_unsat.cwiseMin(hw_.limits.tau_max).cwiseMax(-hw_.limits.tau_max);
     std::array<bool, NUM_JOINTS> clipped{};
     const auto cur_cmd = omx::torqueToCurrent(hw_, tau, dq_hat_, ref.dq, &clipped);
@@ -657,7 +661,7 @@ private:
 
   bool q_initial_captured_;
   Vec4 q_initial_;
-  bool return_logged_{false};
+  omx::JointReturn ret_{omx::JointReturn::forHardware(RETURN_TIME_S)};   // retorno articular final a q_inicial
   std::chrono::high_resolution_clock::time_point start_time_;
   int log_cnt_{0};
   int overrun_cnt_{0};

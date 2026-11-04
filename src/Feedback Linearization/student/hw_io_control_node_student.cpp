@@ -461,10 +461,10 @@ private:
     } else if (!returning) {
       ref = cartesianTrajectory(t - T_TRANS);
     } else {
-      // Retorno articular: quintica desde el estado medido en t_run hasta
+      // Retorno articular: quintica desde la pose medida en t_run hasta
       // q_inicial en reposo, y luego pausa en reposo en q_inicial
       if (!ret_.started()) {
-        ret_.start(q, dq_hat_);
+        ret_.start(q);
         RCLCPP_INFO(get_logger(), "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)",
           t, RETURN_TIME_S);
       }

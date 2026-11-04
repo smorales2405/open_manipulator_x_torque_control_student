@@ -59,13 +59,14 @@
  * Fases temporales completas (ver constantes T_TRANS/RETURN_TIME_S/HOLD_TIME_S):
  *   [0, T_TRANS)                                  transicion quintica a Y_START
  *   [T_TRANS, T_TRANS+t_run)                      seguimiento periodico
- *   [T_TRANS+t_run, T_TRANS+t_run+RETURN_TIME_S)  retorno quintico a y_inicial
+ *   [T_TRANS+t_run, T_TRANS+t_run+RETURN_TIME_S)  retorno articular a q_inicial
  *   [...+RETURN_TIME_S, ...+HOLD_TIME_S)          pausa en reposo (asienta)
  *   >= ...+RETURN_TIME_S+HOLD_TIME_S              corte de corriente y fin
  * El retorno evita que el brazo caiga por gravedad al recibir torque cero de
  * golpe en medio de la trayectoria (t_run<=0 desactiva el retorno: corre
- * indefinidamente). El CSV registra la transicion inicial + el seguimiento (en
- * hardware las fallas suelen ocurrir en la transicion); plots_SMC_cart.m en
+ * indefinidamente). Es infraestructura (omx::JointReturn): no usa la ley de
+ * control de las SECCIONES 5 y 6 ni gain_scale. El CSV registra la transicion
+ * inicial + el seguimiento (en hardware las fallas suelen ocurrir en la transicion); plots_SMC_cart.m en
  * modo 'real' descarta t < T_TRANS para que las metricas sean solo de
  * seguimiento. El retorno y la pausa final NO se guardan en el CSV.
  *
@@ -85,7 +86,8 @@
  *   Parada de emergencia si cond(J4) > COND_J_MAX (150). En el test1 hw la
  *   configuracion derivo a una singularidad (kJ 23 → 18869) y la DLS
  *   repartio comandos grandes en direcciones mal condicionadas hasta llevar
- *   J1 a su limite; esta guarda corta esa divergencia ~1 s antes.
+ *   J1 a su limite; esta guarda corta esa divergencia ~1 s antes. No aplica en
+ *   el retorno y la pausa: ahi el par ya no pasa por el Jacobiano.
  *
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
  *   port_name          [string]  "/dev/ttyUSB0"
@@ -148,6 +150,7 @@
 #include <Eigen/SVD>
 
 #include "omx/dynamixel_arm.hpp"
+#include "omx/joint_return.hpp"
 #include "omx/motor_model.hpp"
 #include "omx/robot_model.hpp"
 #include "omx/ros_utils.hpp"
@@ -586,7 +589,7 @@ private:
 
     const double t_shutdown = T_TRANS + t_run_ + RETURN_TIME_S + HOLD_TIME_S;
     if (t_run_ > 0.0 && t >= t_shutdown) {
-      RCLCPP_INFO(get_logger(), "Retorno a y_inicial completado. Deteniendo (t=%.1f s).", t);
+      RCLCPP_INFO(get_logger(), "Retorno a q_inicial completado. Deteniendo (t=%.1f s).", t);
       timer_->cancel();
       arm_.close();
       if (csv_.is_open()) { csv_.flush(); csv_.close(); }
@@ -623,6 +626,7 @@ private:
       const Eigen::Vector3d p0 = model_.eePosition(q);
       const double phi0        = q[1] + q[2] + q[3];
       y0_ = Eigen::Vector4d{p0[0], p0[1], p0[2], phi0};
+      ret_.setHome(q);   // pose articular a la que vuelve el retorno final
       y0_initialized_ = true;
       RCLCPP_INFO(get_logger(),
         "y_inicial=[%.3f %.3f %.3f %.3f]  Y_START=[%.3f %.3f %.3f %.3f]",
@@ -639,27 +643,32 @@ private:
       }
     }
 
-    // 5. Referencia cartesiana: transicion quintica C2 hacia Y_START (con
-    //    velocidad/aceleracion de la serie en t'=0), seguimiento, y retorno
-    //    quintico final + pausa en reposo (ver RETURN_TIME_S/HOLD_TIME_S)
+    // 5. Referencia: transicion quintica C2 hacia Y_START (con velocidad/aceleracion
+    //    de la serie en t'=0) y seguimiento cartesianos, retorno articular final +
+    //    pausa en reposo (ver RETURN_TIME_S/HOLD_TIME_S). En el retorno y la pausa
+    //    ref.y guarda la pose cartesiana (FK) de la referencia articular ref_q,
+    //    para la guarda de altura y el log.
     CartRef goal0 = desiredTrajectory(0.0);
     goal0.y = Y_START;
     const bool in_trans    = (t < T_TRANS);
     const bool in_tracking = !in_trans && (t_run_ <= 0.0 || t < T_TRANS + t_run_);
+    const bool returning   = !in_trans && !in_tracking;
     CartRef ref;
+    omx::Reference ref_q{q, Vec4::Zero(), Vec4::Zero()};
     if (in_trans) {
       ref = omx::quinticTransition(t, T_TRANS, y0_, goal0);
     } else if (in_tracking) {
       ref = desiredTrajectory(t - T_TRANS);
-    } else if (t < T_TRANS + t_run_ + RETURN_TIME_S) {
-      if (!return_logged_) {
-        RCLCPP_INFO(get_logger(), "Iniciando retorno quintico a y_inicial (t=%.1fs, dur=%.1fs)",
-          t, RETURN_TIME_S);
-        return_logged_ = true;
-      }
-      ref = omx::quinticReturn(t - (T_TRANS + t_run_), RETURN_TIME_S, desiredTrajectory(t_run_), y0_);
     } else {
-      ref.y = y0_;
+      // Quintica desde la pose medida en t_run hasta q_inicial en reposo
+      if (!ret_.started()) {
+        ret_.start(q);
+        RCLCPP_INFO(get_logger(), "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)",
+          t, RETURN_TIME_S);
+      }
+      ref_q = ret_.reference(t - (T_TRANS + t_run_));
+      const Eigen::Vector3d p_ref = model_.eePosition(ref_q.q);
+      ref.y << p_ref[0], p_ref[1], p_ref[2], ref_q.q[1] + ref_q.q[2] + ref_q.q[3];
       ref.ydot.setZero();
       ref.yddot.setZero();
     }
@@ -691,16 +700,24 @@ private:
 
     // 6c. Guarda de singularidad: cerca de una singularidad la DLS reparte
     //     comandos grandes en direcciones mal condicionadas (test1 hw:
-    //     kJ 23 → 18869 y J1 se fue a su limite).
-    if (ctrl.cond_J > COND_J_MAX) {
+    //     kJ 23 → 18869 y J1 se fue a su limite). No aplica en el retorno: el par
+    //     ya no pasa por el Jacobiano.
+    if (!returning && ctrl.cond_J > COND_J_MAX) {
       emergency_stop("Jacobiano mal condicionado: cond(J4)="
                      + std::to_string(ctrl.cond_J) + " (umbral " + std::to_string(COND_J_MAX) + ")");
       return;
     }
 
-    // 7. Conversión torque → corriente (Fc con la velocidad articular deseada)
+    // 7. Conversión torque → corriente (Fc con la velocidad articular deseada).
+    //    En el retorno final el par lo da el retorno articular a q_inicial (la
+    //    ley SMC se evalua igual, pero su par se descarta).
+    const Vec4 tau = returning
+      ? Vec4(ret_.torque(model_, q, dq_hat_, ref_q)
+               .cwiseMin(hw_.limits.tau_max).cwiseMax(-hw_.limits.tau_max))
+      : ctrl.tau;
+    const Vec4 dq_des = returning ? ref_q.dq : ctrl.dq_des;
     std::array<bool, NUM_JOINTS> clipped{};
-    const auto cur_cmd = omx::torqueToCurrent(hw_, ctrl.tau, dq_hat_, ctrl.dq_des, &clipped);
+    const auto cur_cmd = omx::torqueToCurrent(hw_, tau, dq_hat_, dq_des, &clipped);
     tau_saturated_prev_ = tau_saturated_prev_
                         || clipped[0] || clipped[1] || clipped[2] || clipped[3];
 
@@ -736,7 +753,7 @@ private:
     }
 
     // 11. CSV (incluye la transicion inicial y el seguimiento; excluye el
-    //     retorno final a y_inicial y la pausa en reposo. En hardware las
+    //     retorno final a q_inicial y la pausa en reposo. En hardware las
     //     fallas suelen ocurrir en la transicion; plots_SMC_cart.m modo
     //     'real' descarta t < T_TRANS)
     const bool in_return_or_hold = (t_run_ > 0.0 && t >= T_TRANS + t_run_);
@@ -813,7 +830,7 @@ private:
 
   bool y0_initialized_;
   Eigen::Vector4d y0_;
-  bool return_logged_{false};
+  omx::JointReturn ret_{omx::JointReturn::forHardware(RETURN_TIME_S)};   // retorno articular final a q_inicial
 
   bool            integral_{false};
   Eigen::Vector4d z_{Eigen::Vector4d::Zero()};  // termino integral [m/s² | rad/s²]

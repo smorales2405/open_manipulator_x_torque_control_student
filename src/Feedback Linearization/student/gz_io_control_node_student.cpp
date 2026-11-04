@@ -296,7 +296,7 @@ private:
       ref = circularTrajectory(t_ - T_TRANS);
     } else {
       if (!ret_.started()) {
-        ret_.start(q, dq);
+        ret_.start(q);
         RCLCPP_INFO(this->get_logger(),
           "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
       }

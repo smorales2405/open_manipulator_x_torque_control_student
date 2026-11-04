@@ -21,9 +21,10 @@
 //    - Publicador /arm_effort_controller/commands  →  tau
 //    - Rampa quintica de 3 s desde la pose inicial medida hasta el inicio de
 //      la trayectoria 
-//    - Retorno quintico al reposo en q_inicial al cumplirse t_run + pausa en
-//      reposo antes de soltar el torque: el robot queda en la pose de partida
-//      y el nodo se puede volver a ejecutar sobre el mismo Gazebo
+//    - Retorno articular suave (5to orden, omx::JointReturn) a q_inicial al
+//      cumplirse t_run + pausa en reposo antes de soltar el torque: el robot
+//      queda en la pose de partida y el nodo se puede volver a ejecutar sobre
+//      el mismo Gazebo
 //    - Escritura de CSV:  gz_fl_data_<test_num>.csv (sin el retorno final)
 //    - Timer de control a 200 Hz (igual que los nodos hw_)
 //    - Parametros ROS:  test_num, t_run
@@ -48,6 +49,7 @@
 #include "std_msgs/msg/float64_multi_array.hpp"
 
 #include <Eigen/Core>
+#include "omx/joint_return.hpp"
 #include "omx/robot_model.hpp"
 #include "omx/ros_utils.hpp"
 #include "omx/trajectory.hpp"
@@ -216,29 +218,28 @@ private:
     // Captura de la pose inicial (primer tick con /joint_states valido)
     if (!q_initial_captured_) {
       q_initial_ = q;
+      ret_.setHome(q);   // pose articular a la que vuelve el retorno final
       q_initial_captured_ = true;
       RCLCPP_INFO(this->get_logger(), "q_inicial=[%.3f %.3f %.3f %.3f] rad",
         q[0], q[1], q[2], q[3]);
     }
 
     // Referencia: rampa quintica inicial + trayectoria deseada + retorno
-    // quintico a q_inicial + pausa en reposo (infraestructura)
+    // articular a q_inicial + pausa en reposo (infraestructura)
+    const bool returning = (t_run_ > 0.0 && t_ >= t_run_);
     Reference ref;
-    if (t_ < RAMP_TIME_S) {
-      ref = omx::quinticTransition(t_, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
-    } else if (t_run_ <= 0.0 || t_ < t_run_) {
-      ref = desiredTrajectory(t_);
-    } else if (t_ < t_run_ + RETURN_TIME_S) {
-      if (!return_logged_) {
+    if (returning) {
+      // Quintica desde la pose medida en t_run hasta q_inicial en reposo
+      if (!ret_.started()) {
+        ret_.start(q);
         RCLCPP_INFO(this->get_logger(),
-          "Iniciando retorno quintico a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
-        return_logged_ = true;
+          "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
       }
-      ref = omx::quinticReturn(t_ - t_run_, RETURN_TIME_S, desiredTrajectory(t_run_), q_initial_);
+      ref = ret_.reference(t_ - t_run_);
+    } else if (t_ < RAMP_TIME_S) {
+      ref = omx::quinticTransition(t_, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
     } else {
-      ref.q = q_initial_;
-      ref.dq.setZero();
-      ref.ddq.setZero();
+      ref = desiredTrajectory(t_);
     }
 
     // ── 2. Matriz de masa  M(q)  [NARM x NARM] ────────────────────────────
@@ -265,6 +266,13 @@ private:
 
     // ══════════════════════════════════════════════════════════════════════
 
+    // ── Retorno final a la pose inicial (infraestructura, NO modificar) ────
+    //  Desde t_run el par lo da el retorno articular (omx::JointReturn); el
+    //  de la Seccion 3 se descarta.
+    if (returning) {
+      tau_sat = ret_.torque(model_, q, dq, ref);
+    }
+
     // ── Feedforward de friccion del URDF (infraestructura, NO modificar) ───
     //  Gazebo simula la friccion articular del URDF, pero Pinocchio no la
     //  incluye en M/nle: se compensa aqui, fuera de la ley de control.
@@ -287,8 +295,7 @@ private:
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
     // ── 5. CSV (excluye el retorno final y la pausa en reposo) ────────────
-    const bool in_return_or_hold = (t_run_ > 0.0 && t_ >= t_run_);
-    if (csv_.is_open() && !in_return_or_hold) {
+    if (csv_.is_open() && !returning) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
            << ',' << q[0]       << ',' << q[1]       << ',' << q[2]       << ',' << q[3]
@@ -331,7 +338,7 @@ private:
 
   Eigen::Vector4d q_initial_{Eigen::Vector4d::Zero()};
   bool q_initial_captured_{false};
-  bool return_logged_{false};
+  omx::JointReturn ret_{omx::JointReturn::forSimulation(RETURN_TIME_S)};   // retorno articular final a q_inicial
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr torque_pub_;
   omx::JointStateListener js_{*this};   // /joint_states (joint1..joint4 por nombre)

@@ -23,8 +23,8 @@
  *     DESEADA 
  *   - Saturacion del torque a +/-tau_max antes de enviar corriente
  *   - Transicion quintica de 3 s desde la posicion inicial hasta el inicio de la trayectoria
- *   - Retorno quintico al reposo en q_inicial al completar t_run + pausa en
- *     reposo antes de cortar corriente 
+ *   - Retorno articular al reposo en q_inicial (omx::JointReturn) al completar
+ *     t_run + pausa en reposo antes de cortar corriente
  *   - Verificacion de limites articulares y de corriente medida (parada de emergencia)
  *   - Deteccion de overruns del lazo de control
  *   - Publicador /hw/joint_states y escritura de CSV (el retorno final y la
@@ -68,6 +68,7 @@
 #include <Eigen/Dense>
 
 #include "omx/dynamixel_arm.hpp"
+#include "omx/joint_return.hpp"
 #include "omx/motor_model.hpp"
 #include "omx/robot_model.hpp"
 #include "omx/ros_utils.hpp"
@@ -93,7 +94,7 @@ static constexpr int    NUM_JOINTS = 4;
 // (config/motorXM430W350T_params.yaml como parametros ROS 2).
 
 static constexpr double RAMP_TIME_S   = 3.0;   // duracion de la transicion inicial [s]
-static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno quintico a q_inicial
+static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno articular a q_inicial
 static constexpr double HOLD_TIME_S   = 0.5;   // pausa en reposo antes de cortar corriente
 
 using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
@@ -350,41 +351,48 @@ private:
     // 3. Captura posicion inicial (primer tick)
     if (!q_initial_captured_) {
       q_initial_         = q;
+      ret_.setHome(q);   // pose articular a la que vuelve el retorno final
       q_initial_captured_ = true;
       RCLCPP_INFO(get_logger(), "q_inicial=[%.3f %.3f %.3f %.3f] rad",
         q(0), q(1), q(2), q(3));
     }
 
-    // 4. Referencia (transicion quintica + trayectoria + retorno final)
+    // 4. Referencia (transicion quintica + trayectoria + retorno articular final)
+    const bool returning = (t_run_ > 0.0 && t >= t_run_);
     Reference ref;
-    if (t < RAMP_TIME_S) {
-      ref = omx::quinticTransition(t, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
-    } else if (t_run_ <= 0.0 || t < t_run_) {
-      ref = desiredTrajectory(t);
-    } else if (t < t_run_ + RETURN_TIME_S) {
-      if (!return_logged_) {
-        RCLCPP_INFO(get_logger(), "Iniciando retorno quintico a q_inicial (t=%.1fs, dur=%.1fs)",
+    if (returning) {
+      // Quintica desde la pose medida en t_run hasta q_inicial en reposo
+      if (!ret_.started()) {
+        ret_.start(q);
+        RCLCPP_INFO(get_logger(), "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)",
           t, RETURN_TIME_S);
-        return_logged_ = true;
       }
-      ref = omx::quinticReturn(t - t_run_, RETURN_TIME_S, desiredTrajectory(t_run_), q_initial_);
+      ref = ret_.reference(t - t_run_);
+    } else if (t < RAMP_TIME_S) {
+      ref = omx::quinticTransition(t, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
     } else {
-      ref.q = q_initial_;
-      ref.dq.setZero();
-      ref.ddq.setZero();
+      ref = desiredTrajectory(t);
     }
 
-    // 5. Verificar limites de la referencia
+    // 5. Verificar limites: referencia y estado medido
     for (int i = 0; i < NUM_JOINTS; ++i) {
       if (ref.q(i) < hw_.limits.joint_lower(i) + 0.02 || ref.q(i) > hw_.limits.joint_upper(i) - 0.02) {
         emergency_stop("Referencia fuera de limites articulares");
         return;
       }
+      if (q(i) < hw_.limits.joint_lower(i) || q(i) > hw_.limits.joint_upper(i)) {
+        emergency_stop("Articulacion " + std::to_string(i+1) + " fuera de limites: "
+                       + std::to_string(q(i)) + " rad");
+        return;
+      }
     }
 
     // 6. Ley de control — usa dq_hat_ para reducir chattering; el torque se
-    //    satura a +/-tau_max antes de convertirlo a corriente
-    const Vec4 tau_unsat = compute_torque(q, dq_hat_, ref);
+    //    satura a +/-tau_max antes de convertirlo a corriente. En el retorno
+    //    final el par lo da el retorno articular a q_inicial.
+    const Vec4 tau_unsat = returning
+      ? ret_.torque(model_, q, dq_hat_, ref)
+      : compute_torque(q, dq_hat_, ref);
     const Vec4 tau = tau_unsat.cwiseMin(hw_.limits.tau_max).cwiseMax(-hw_.limits.tau_max);
     const auto cur_cmd = omx::torqueToCurrent(hw_, tau, dq_hat_, ref.dq);
 
@@ -421,8 +429,7 @@ private:
 
     // 10. CSV (excluye el retorno final a q_inicial y la pausa en reposo,
     //     asi el CSV solo cubre la rampa inicial + trayectoria periodica)
-    const bool in_return_or_hold = (t_run_ > 0.0 && t >= t_run_);
-    if (csv_.is_open() && !in_return_or_hold) {
+    if (csv_.is_open() && !returning) {
       csv_ << std::fixed << std::setprecision(6) << t
            << ',' << q(0)        << ',' << q(1)        << ',' << q(2)        << ',' << q(3)
            << ',' << dq(0)       << ',' << dq(1)       << ',' << dq(2)       << ',' << dq(3)
@@ -476,7 +483,7 @@ private:
   omx::DynamixelArm arm_{this->get_logger()};
 
   bool q_initial_captured_;
-  bool return_logged_{false};
+  omx::JointReturn ret_{omx::JointReturn::forHardware(RETURN_TIME_S)};   // retorno articular final a q_inicial
   Vec4 q_initial_;
   std::chrono::high_resolution_clock::time_point start_time_;
   int log_cnt_{0};
