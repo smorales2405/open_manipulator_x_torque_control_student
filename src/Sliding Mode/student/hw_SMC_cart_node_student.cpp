@@ -71,7 +71,7 @@
  * seguimiento. El retorno y la pausa final NO se guardan en el CSV.
  *
  * ARRANQUE: el control inicia solo con el robot en la posicion articular inicial
- * de config/hw_initial_pose.yaml (omx::waitForInitialPose); fuera de ese rango el
+ * de config/control/hw_initial_pose.yaml (omx::waitForInitialPose); fuera de ese rango el
  * nodo muestra donde colocarlo y espera ENTER. La transicion levanta el brazo desde
  * esa pose contra gravedad+stiction, que fue lo que divergio en el test1 hw: usar
  * gain_scale:=0.5 en el primer ensayo.
@@ -103,7 +103,7 @@
  *   loop_rate_hz       [double]  200.0  (frecuencia del lazo [Hz], acotada [50,400])
  *
  * Parametros del modelo identificado (auto-cargados desde
- * config/motorXM430W350T_params.yaml): motor_alpha, motor_Fv, motor_Fc,
+ * config/control/motorXM430W350T_params.yaml): motor_alpha, motor_Fv, motor_Fc,
  * motor_I_offset, motor_epsilon_friction, joint_zero_tick, encoder_sign,
  * current_sign, joint_lower/upper, current_*_limit, tau_max.
  *
@@ -173,7 +173,7 @@ static constexpr double PI = 3.14159265358979323846;
 static constexpr int    NUM_JOINTS = 4;
 
 // Calibracion, limites y modelo del motor: omx::declareHwConfig
-// (config/motorXM430W350T_params.yaml como parametros ROS 2).
+// (config/control/motorXM430W350T_params.yaml como parametros ROS 2).
 
 // Amortiguamiento DLS para pseudo-inversa (evita divergencia en singularidades)
 static constexpr double LAMBDA_DLS    = 0.01;
@@ -342,7 +342,7 @@ public:
     this->declare_parameter<double>("ab_beta",  0.02);
     this->declare_parameter<double>("loop_rate_hz", 200.0);
 
-    // Modelo del motor, calibracion y limites (config/motorXM430W350T_params.yaml)
+    // Modelo del motor, calibracion y limites (config/control/motorXM430W350T_params.yaml)
     hw_ = omx::declareHwConfig(*this);
 
     port_name_  = this->get_parameter("port_name").as_string();
@@ -404,7 +404,7 @@ public:
       throw std::runtime_error("Hardware init failed");
     }
 
-    // ── Posicion articular inicial (config/hw_initial_pose.yaml) ─────────────
+    // ── Posicion articular inicial (config/control/hw_initial_pose.yaml) ─────
     // Espera a que el robot este en su posicion inicial. El CSV se abre despues:
     // salir aqui con Ctrl+C no borra un CSV anterior con el mismo numero de prueba.
     if (!omx::waitForInitialPose(*this, arm_)) {

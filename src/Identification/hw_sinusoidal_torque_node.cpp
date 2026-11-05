@@ -996,7 +996,7 @@ int main(int argc, char* argv[])
   rclcpp::init(argc, argv);
 
   rclcpp::NodeOptions opts;
-  const std::string cfg = std::string(PACKAGE_CONFIG_DIR) + "/hw_sinusoidal_torque_params.yaml";
+  const std::string cfg = std::string(PACKAGE_CONFIG_DIR) + "/identification/hw_sinusoidal_torque_params.yaml";
 
   if (std::filesystem::exists(cfg)) {
     // Construimos la lista de args combinando: YAML primero, luego los --ros-args

@@ -9,7 +9,7 @@ Publica:
   · TF estatico  "target_yf"   — frame en la posicion objetivo yf
   · /fkin_markers (MarkerArray) — ejes RGB en end_effector_link y en target_yf
 
-Parametros ROS (ver config/fkin_params.yaml):
+Parametros ROS (ver config/forward_kinematics/fkin_params.yaml):
   yf.x, yf.y, yf.z   [m]   posicion objetivo del efector final
   yf.phi              [rad] angulo de pitch objetivo (solo informativo)
   print_rate_hz       [Hz]  frecuencia de impresion en terminal

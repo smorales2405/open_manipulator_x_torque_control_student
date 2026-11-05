@@ -51,7 +51,7 @@ from launch_ros.actions import Node
 
 def launch_setup(context, *args, **kwargs):
     pkg = get_package_share_directory('open_manipulator_x_torque_control')
-    params_file = os.path.join(pkg, 'config', 'hw_friction_sweep_params.yaml')
+    params_file = os.path.join(pkg, 'config', 'identification', 'hw_friction_sweep_params.yaml')
 
     fj = int(LaunchConfiguration('friction_joint').perform(context))
     if fj < 1 or fj > 4:

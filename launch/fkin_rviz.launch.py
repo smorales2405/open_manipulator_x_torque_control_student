@@ -11,7 +11,7 @@ Lanza el OpenManipulator-X en RViz con:
 Uso:
   ros2 launch open_manipulator_x_torque_control fkin_rviz.launch.py
 
-Para cambiar el target yf edita config/fkin_params.yaml y relanza.
+Para cambiar el target yf edita config/forward_kinematics/fkin_params.yaml y relanza.
 
 Notas URDF:
   Se usa open_manipulator_x_description/urdf/open_manipulator_x_robot.urdf.xacro
@@ -31,8 +31,8 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
 
     pkg         = get_package_share_directory('open_manipulator_x_torque_control')
-    rviz_path   = os.path.join(pkg, 'config', 'fkin_rviz.rviz')
-    params_path = os.path.join(pkg, 'config', 'fkin_params.yaml')
+    rviz_path   = os.path.join(pkg, 'config', 'forward_kinematics', 'fkin_rviz.rviz')
+    params_path = os.path.join(pkg, 'config', 'forward_kinematics', 'fkin_params.yaml')
 
     # ── URDF: xacro oficial de open_manipulator_x_description ─────────────
     # xacro_oneline.sh: elimina comentarios XML y newlines (evita errores yaml-cpp).
@@ -94,7 +94,7 @@ def generate_launch_description():
     )
 
     # ── fkin_display_node ─────────────────────────────────────────────────
-    # Parametros cargados desde config/fkin_params.yaml.
+    # Parametros cargados desde config/forward_kinematics/fkin_params.yaml.
     # Para cambiar yf edita ese archivo y relanza.
     fkin_node = Node(
         package='open_manipulator_x_torque_control',

@@ -99,7 +99,7 @@ static constexpr double KT_DATASHEET_NM_A = 1.7826;
 static constexpr double ALPHA_NOM = 1.0 / (KT_DATASHEET_NM_A * omx::CURRENT_UNIT_A);
 
 // Calibración y límites: omx::declareCalibration / omx::declareHwLimits
-// (bloque de hardware de config/motorXM430W350T_params.yaml).
+// (bloque de hardware de config/control/motorXM430W350T_params.yaml).
 
 static constexpr double RAMP_TIME_S   = 3.0;
 static constexpr double RETURN_TIME_S = 3.0;   // duración del retorno quíntico a q_inicial

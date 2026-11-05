@@ -16,7 +16,7 @@ namespace omx
 namespace
 {
 
-// Parametros de config/motorXM430W350T_params.yaml, leidos una sola vez
+// Parametros de config/control/motorXM430W350T_params.yaml, leidos una sola vez
 const std::unordered_map<std::string, rclcpp::Parameter> & motorYaml()
 {
   static std::unordered_map<std::string, rclcpp::Parameter> params;
@@ -46,7 +46,7 @@ std::array<T, NUM_JOINTS> toArray4(const std::vector<T> & v, const std::string &
 
 }  // namespace
 
-std::string motorYamlPath() { return std::string(OMX_CONFIG_DIR) + "/motorXM430W350T_params.yaml"; }
+std::string motorYamlPath() { return std::string(OMX_CONFIG_DIR) + "/control/motorXM430W350T_params.yaml"; }
 
 std::vector<double> motorYamlDoubles(const std::string & name, const std::vector<double> & fallback)
 {

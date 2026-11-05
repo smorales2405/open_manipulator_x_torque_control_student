@@ -18,7 +18,7 @@
  *     ni el retardo del registro de velocidad Dynamixel (defaults validados
  *     en el FL: α=0.2, β=0.02 @ 200 Hz)
  *   - Escritura de corriente SyncWrite (send_currents)
- *   - Conversion torque -> corriente via modelo OLS identificado (motor_params.yaml);
+ *   - Conversion torque -> corriente via modelo OLS identificado (motorXM430W350T_params.yaml);
  *     la compensacion de Coulomb usa la velocidad DESEADA dq_ref (leccion del
  *     FL: sin chattering por ruido de dq y empuje de despegue al arrancar)
  *   - Verificacion de corriente medida (parada de emergencia)
@@ -137,7 +137,7 @@ public:
     this->declare_parameter<double>("ab_beta",      0.02);
     this->declare_parameter<double>("loop_rate_hz", 200.0);
 
-    // Modelo del motor, calibracion y limites (config/motorXM430W350T_params.yaml)
+    // Modelo del motor, calibracion y limites (config/control/motorXM430W350T_params.yaml)
     hw_ = omx::declareHwConfig(*this);
 
     port_name_        = this->get_parameter("port_name").as_string();
@@ -471,7 +471,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
 
-  // Auto-carga config/motorXM430W350T_params.yaml; los -p de la línea de comandos
+  // Auto-carga config/control/motorXM430W350T_params.yaml; los -p de la línea de comandos
   // (test_num, torque_scale, etc.) lo sobrescriben → no requiere launch.
   const rclcpp::NodeOptions opts = omx::motorParamsNodeOptions(argc, argv, "hw_tvlqr_node");
 

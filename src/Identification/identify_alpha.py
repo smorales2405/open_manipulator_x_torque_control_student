@@ -168,7 +168,7 @@ else:
 # Signos de hardware: I_cmd/I_meas del CSV están en el dominio crudo del
 # Dynamixel; I_offset se expresa en el dominio articular del modelo.
 SGN = np.ones(NJ)
-cfg_path = os.path.join(PKG_DIR, "config", "motorXM430W350T_params.yaml")
+cfg_path = os.path.join(PKG_DIR, "config", "control", "motorXM430W350T_params.yaml")
 if os.path.isfile(cfg_path):
     with open(cfg_path) as f:
         prm = (yaml.safe_load(f) or {}).get("/**", {}).get("ros__parameters", {})

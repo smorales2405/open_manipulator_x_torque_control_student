@@ -1,5 +1,5 @@
 // Chequeo de la posicion articular inicial de los nodos hw_ de Feedback
-// Linearization y SMC. El rango se edita en config/hw_initial_pose.yaml, sin
+// Linearization y SMC. El rango se edita en config/control/hw_initial_pose.yaml, sin
 // recompilar.
 //
 //   arm_.open(...);

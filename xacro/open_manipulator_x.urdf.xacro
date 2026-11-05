@@ -33,7 +33,7 @@
       name="meshes_file_direction"
       value="package://open_manipulator_x_torque_control/meshes"/>
 
-    <!-- Friccion articular: leida desde config/motorXM430W350T_params.yaml
+    <!-- Friccion articular: leida desde config/control/motorXM430W350T_params.yaml
          (identificacion torque->corriente del robot real via
          src/Identification/Ident_OpenManX_XM430W350T_procedure.md), en
          dominio de torque: Fv = motor_Fv/motor_alpha [N·m·s/rad],
@@ -43,7 +43,7 @@
          actualizarse por separado tras cada re-identificacion — y
          gz_MRAC_joint_12p_node.cpp). -->
     <xacro:property name="_motor_cfg_path"
-      value="$(find open_manipulator_x_torque_control)/config/motorXM430W350T_params.yaml"/>
+      value="$(find open_manipulator_x_torque_control)/config/control/motorXM430W350T_params.yaml"/>
     <xacro:property name="_motor_cfg"
       value="${xacro.load_yaml(_motor_cfg_path)['/**']['ros__parameters']}"/>
     <xacro:property name="_fv1" value="${_motor_cfg['motor_Fv'][0] / _motor_cfg['motor_alpha'][0]}"/>

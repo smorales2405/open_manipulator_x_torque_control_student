@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 update_urdf_friction.py
-Copia la fricción identificada de config/motorXM430W350T_params.yaml al URDF
+Copia la fricción identificada de config/control/motorXM430W350T_params.yaml al URDF
 estático urdf/open_manipulator_x.urdf, en el dominio de TORQUE:
 
     damping  [N·m·s/rad] = motor_Fv / motor_alpha
@@ -19,7 +19,7 @@ identificación, el controlador simulado compensa una fricción distinta de la
 que tiene la planta.
 
 Ejecutarlo DESPUÉS de activar el modelo nuevo (Paso 3 del protocolo):
-    cp config/motorXM430W350T_params_identified.yaml config/motorXM430W350T_params.yaml
+    cp config/identification/motorXM430W350T_params_identified.yaml config/control/motorXM430W350T_params.yaml
     python3 src/Identification/update_urdf_friction.py --dry-run   # muestra el cambio
     python3 src/Identification/update_urdf_friction.py             # escribe el URDF
 
@@ -41,7 +41,7 @@ NJ = 4
 
 ap = argparse.ArgumentParser(description="Copia Fv/Fc del YAML de motor al "
                              "<dynamics> de joint1..joint4 del URDF estático.")
-ap.add_argument("--params", default=os.path.join(PKG_DIR, "config",
+ap.add_argument("--params", default=os.path.join(PKG_DIR, "config", "control",
                 "motorXM430W350T_params.yaml"), help="YAML de motor (entrada)")
 ap.add_argument("--urdf", default=os.path.join(PKG_DIR, "urdf",
                 "open_manipulator_x.urdf"), help="URDF a actualizar")
@@ -69,7 +69,7 @@ if all(v == 0 for v in Fv + Fc) and not args.force:
     print(f"ERROR: {os.path.basename(args.params)} tiene Fv = Fc = 0 en los 4 joints")
     print("  (¿YAML en modo bootstrap?). Copiarlo dejaría el URDF sin fricción.")
     print("→ Acción: active primero el modelo identificado (Paso 3 del protocolo):")
-    print("     cp config/motorXM430W350T_params_identified.yaml config/motorXM430W350T_params.yaml")
+    print("     cp config/identification/motorXM430W350T_params_identified.yaml config/control/motorXM430W350T_params.yaml")
     print("  o use --force si de verdad quiere fricción nula en el URDF.")
     sys.exit(2)
 

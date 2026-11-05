@@ -25,7 +25,7 @@
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
  *   port_name   [string]  "/dev/ttyUSB0"
  *   Calibracion (joint_zero_tick, encoder_sign): por defecto la del YAML
- *   config/motorXM430W350T_params.yaml (omx::declareCalibration).
+ *   config/control/motorXM430W350T_params.yaml (omx::declareCalibration).
  *
  * Publisher: /hw/joint_states (sensor_msgs/JointState) — solo monitoreo
  *

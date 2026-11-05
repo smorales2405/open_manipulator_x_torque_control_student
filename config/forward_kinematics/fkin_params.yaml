@@ -1,4 +1,4 @@
-# config/fkin_params.yaml
+# config/forward_kinematics/fkin_params.yaml
 # Parametros del nodo fkin_display_node
 # ──────────────────────────────────────────────────────────────────────────────
 # Modifica yf.x / yf.y / yf.z / yf.phi para cambiar la posicion objetivo

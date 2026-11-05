@@ -65,7 +65,7 @@
  *   loop_rate_hz [double] 200.0
  *
  * Parametros del modelo identificado auto-cargados desde
- * config/motorXM430W350T_params.yaml (prioridad sobre -p del CLI):
+ * config/control/motorXM430W350T_params.yaml (prioridad sobre -p del CLI):
  * motor_alpha, motor_Fv, motor_Fc, motor_I_offset, motor_epsilon_friction,
  * joint_zero_tick, encoder_sign, current_sign, joint_lower/upper,
  * current_*_limit, tau_max.
@@ -291,7 +291,7 @@ public:
     this->declare_parameter<double>("ab_beta",  0.06);
     this->declare_parameter<double>("loop_rate_hz", 200.0);
 
-    // Modelo del motor, calibracion y limites (config/motorXM430W350T_params.yaml)
+    // Modelo del motor, calibracion y limites (config/control/motorXM430W350T_params.yaml)
     hw_ = omx::declareHwConfig(*this);
 
     port_name_  = this->get_parameter("port_name").as_string();

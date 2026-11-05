@@ -31,7 +31,7 @@ Entrada : data/diagnostics/sinusoidal/hw_sin_torque_<LOG_ID>.csv
           (generado por hw_sinusoidal_torque_node en modo "position")
 Salidas :
     1) Consola : alpha, Fv, Fc, I_offset y R² por articulación.
-    2) YAML    : config/motorXM430W350T_params_posmode.yaml  (referencia modo posición;
+    2) YAML    : config/identification/motorXM430W350T_params_posmode.yaml  (referencia modo posición;
                  NO es el modelo final — ese se ensambla con assemble_motor_params.py
                  combinando identify_alpha.py + identify_friction.py)
     3) CSV     : data/identification/identify_fit_<LOG_ID>.csv
@@ -310,13 +310,13 @@ if kt_check > 1.7826:
     print(f"   (Confirmado en estos datos: kt_ef = {kt_check:.2f} N·m/A > 1.78 ideal.)\n")
 
 # ════════════════════════════════════════════════════════════════════════════
-#  Salida 1: YAML  config/motorXM430W350T_params_posmode.yaml  (referencia)
+#  Salida 1: YAML  config/identification/motorXM430W350T_params_posmode.yaml  (referencia)
 #  NO es el modelo final: el modo posición sesga alpha por el PID interno.
 #  El modelo final (motorXM430W350T_params.yaml) se ensambla a mano con alpha de
 #  modo corriente + Fv/Fc de identify_friction.py.
 # ════════════════════════════════════════════════════════════════════════════
 
-yaml_out = os.path.join(PKG_DIR, "config", "motorXM430W350T_params_posmode.yaml")
+yaml_out = os.path.join(PKG_DIR, "config", "identification", "motorXM430W350T_params_posmode.yaml")
 fmt = lambda v: "[" + ", ".join(f"{x:.4f}" for x in v) + "]"
 today = datetime.date.today().isoformat()
 

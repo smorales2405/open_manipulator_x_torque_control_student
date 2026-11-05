@@ -9,12 +9,12 @@ cada parámetro de su método de identificación MÁS ADECUADO:
     · Fv, Fc          → identify_friction.py  (barrido de velocidad + reversión,
                                                un log por articulación)
 
-y escribe config/motorXM430W350T_params_identified.yaml con el MISMO formato
-que config/motorXM430W350T_params.yaml (incluyendo el bloque de configuración
+y escribe config/identification/motorXM430W350T_params_identified.yaml con el MISMO formato
+que config/control/motorXM430W350T_params.yaml (incluyendo el bloque de configuración
 de hardware, copiado del archivo actual). El archivo generado NO reemplaza al
 oficial: revíselo y cópielo a mano cuando esté conforme:
 
-    cp config/motorXM430W350T_params_identified.yaml config/motorXM430W350T_params.yaml
+    cp config/identification/motorXM430W350T_params_identified.yaml config/control/motorXM430W350T_params.yaml
 
 Entradas (fragmentos generados en data/identification/):
     alpha_fit_log<A>.yaml            (identify_alpha.py)
@@ -68,7 +68,7 @@ ap.add_argument("--friction-logs", required=True, nargs=4, metavar=("J1", "J2", 
                 help="4 IDs de logs de identify_friction.py, en orden J1 J2 J3 J4")
 ap.add_argument("--eps", type=float, default=0.05,
                 help="motor_epsilon_friction del YAML final (def. 0.05)")
-ap.add_argument("--out", default=os.path.join(PKG_DIR, "config",
+ap.add_argument("--out", default=os.path.join(PKG_DIR, "config", "identification",
                 "motorXM430W350T_params_identified.yaml"),
                 help="ruta del YAML ensamblado")
 args = ap.parse_args()
@@ -148,7 +148,7 @@ if problems:
     sys.exit(2)
 
 # ── Bloque de hardware: copiar del YAML oficial actual si existe ─────────────
-official = os.path.join(PKG_DIR, "config", "motorXM430W350T_params.yaml")
+official = os.path.join(PKG_DIR, "config", "control", "motorXM430W350T_params.yaml")
 hw = dict(HW_DEFAULTS)
 old = None
 if os.path.isfile(official):

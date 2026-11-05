@@ -37,7 +37,7 @@
  *     pausa en reposo no se registran en el CSV)
  *
  * Arranque: el control inicia solo con el robot en la posicion articular inicial
- * de config/hw_initial_pose.yaml (omx::waitForInitialPose); fuera de ese rango el
+ * de config/control/hw_initial_pose.yaml (omx::waitForInitialPose); fuera de ese rango el
  * nodo muestra donde colocarlo y espera ENTER.
  *
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
@@ -50,7 +50,7 @@
  *   friction_fc_scale      [double]   0.95   (fraccion de Fc compensada)
  *   loop_rate_hz           [double]   200.0  (frecuencia del lazo [Hz], acotada [50,400])
  *
- * Parametros del modelo identificado (config/motorXM430W350T_params.yaml):
+ * Parametros del modelo identificado (config/control/motorXM430W350T_params.yaml):
  *   motor_alpha            [double[4]]   ticks/N·m
  *   motor_Fv               [double[4]]   ticks/(rad/s)
  *   motor_Fc               [double[4]]   ticks
@@ -103,7 +103,7 @@ static constexpr double PI         = 3.14159265358979323846;
 static constexpr int    NUM_JOINTS = 4;
 
 // Calibracion, limites y modelo del motor: omx::declareHwConfig
-// (config/motorXM430W350T_params.yaml como parametros ROS 2).
+// (config/control/motorXM430W350T_params.yaml como parametros ROS 2).
 
 using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 
@@ -202,7 +202,7 @@ public:
     this->declare_parameter<double>("ab_beta",  0.02);
     this->declare_parameter<double>("loop_rate_hz", 200.0);
 
-    // Modelo del motor, calibracion y limites (config/motorXM430W350T_params.yaml)
+    // Modelo del motor, calibracion y limites (config/control/motorXM430W350T_params.yaml)
     hw_ = omx::declareHwConfig(*this);
 
     port_name_  = this->get_parameter("port_name").as_string();
@@ -249,7 +249,7 @@ public:
       throw std::runtime_error("Hardware init failed");
     }
 
-    // ── Posicion articular inicial (config/hw_initial_pose.yaml) ─────────────
+    // ── Posicion articular inicial (config/control/hw_initial_pose.yaml) ─────
     // Espera a que el robot este en su posicion inicial. El CSV se abre despues:
     // salir aqui con Ctrl+C no borra un CSV anterior con el mismo numero de prueba.
     if (!omx::waitForInitialPose(*this, arm_)) {

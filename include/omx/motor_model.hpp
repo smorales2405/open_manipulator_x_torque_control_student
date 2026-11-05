@@ -1,5 +1,5 @@
 // Modelo identificado torque → corriente de los XM430-W350-T y parametros de
-// hardware (config/motorXM430W350T_params.yaml).
+// hardware (config/control/motorXM430W350T_params.yaml).
 #pragma once
 
 #include <array>

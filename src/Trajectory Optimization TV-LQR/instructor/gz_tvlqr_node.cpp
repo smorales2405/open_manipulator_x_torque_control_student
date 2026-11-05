@@ -76,7 +76,7 @@ static constexpr double TAU_MAX = 1.2;   // [N·m] limite de torque por articula
 // bf=0.001) no la incluye → se compensa SIEMPRE con feedforward:
 //   tau_fric_i = b_i*dq_i + fc_i*tanh(dq_ref_i/FRIC_EPS)
 // Valores nominales de urdf/open_manipulator_x.urdf; asume friction_scale=1.0
-// y damping_scale=1.0 en config/sim_init_config.yaml.
+// y damping_scale=1.0 en config/control/sim_init_config.yaml.
 static constexpr double FRIC_EPS = 0.05;                              // [rad/s]
 static const Eigen::Vector4d FRIC_DAMPING(0.0367, 0.0,    0.0,    0.005);
 static const Eigen::Vector4d FRIC_COULOMB(0.0146, 0.0830, 0.1143, 0.0413);

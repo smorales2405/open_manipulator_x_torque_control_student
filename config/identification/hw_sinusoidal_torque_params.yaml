@@ -74,10 +74,10 @@ hw_sinusoidal_torque_node:
     pos_profile_vel: 50                # [ticks]  1 tick = 0.229 rpm → 50 ≈ 11.5 RPM
     pos_profile_acc: 20                # [ticks]  0 = aceleración máxima (sin suavizado)
 
-    # ── Los parámetros de motor se cargan desde motor_params.yaml ────────────
-    # Para cargar motor_params.yaml adicionalmente:
+    # ── Los parámetros de motor se cargan desde motorXM430W350T_params.yaml ──
+    # Para cargarlo adicionalmente:
     #   ros2 run ... hw_sinusoidal_torque_node --ros-args \
-    #     --params-file .../motor_params.yaml -p log_id:=2
-    # Sin motor_params.yaml se usan los defaults nominales (sin fricción ni offset):
+    #     --params-file config/control/motorXM430W350T_params.yaml -p log_id:=2
+    # Sin ese archivo se usan los defaults nominales (sin fricción ni offset):
     #   motor_alpha: [208.5, 208.5, 208.5, 208.5]
     #   motor_Fv / motor_Fc / motor_I_offset: [0, 0, 0, 0]

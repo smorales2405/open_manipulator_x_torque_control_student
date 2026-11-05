@@ -11,7 +11,7 @@
 %   Figura 6 — Parametros estimados (2x2): alpha_hat, theta_load_hat
 %               (dm/dmc en ejes izq/der), Fv1_hat, Fc_hat — con lineas de
 %               referencia en los valores VERDADEROS de la planta (escalas de
-%               config/sim_init_config.yaml y carga LOAD_TRUE)
+%               config/control/sim_init_config.yaml y carga LOAD_TRUE)
 %
 %   Metricas reportadas en consola (por articulacion):
 %     e_q,max [rad] | e_q,RMS [rad] | max|tau| [N·m] | tau_RMS [N·m] | Sat [%] | TV(tau)
@@ -42,7 +42,7 @@ EXPORT_FIGS = false;        % true  = guardar PNG (300 dpi) y EPS vectorial (600
 
 TAU_MAX     = 1.2;          % [N·m] limite de torque (debe coincidir con el nodo)
 
-% Escalas de la PLANTA usadas en config/sim_init_config.yaml al generar este
+% Escalas de la PLANTA usadas en config/control/sim_init_config.yaml al generar este
 % ensayo — definen los valores verdaderos de los parametros (lineas de
 % referencia en la Figura 6):
 MASS_SCALE_TRUE     = 1.0;  % mass_inertia_scale -> alpha1..3 verdadero
@@ -59,7 +59,7 @@ LOAD_TRUE = [0, 0, 0, 0];
 
 % Friccion nominal identificada (URDF/Xacro escala 1.0, mismos valores del
 % nodo). Actualizados tras el ensayo bootstrap de identificacion
-% (2026-07-19, config/motorXM430W350T_params.yaml re-identificado).
+% (2026-07-19, config/control/motorXM430W350T_params.yaml re-identificado).
 FV_NOM = [0.0201, 0.0089, 0.0000, 0.0032];   % [N·m·s/rad]
 FC_NOM = [0.0370, 0.0849, 0.1324, 0.0453];   % [N·m]
 

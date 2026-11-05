@@ -7,7 +7,7 @@ El robot sigue la trayectoria articular act1 (con J4 oscilando ±0.25 rad
 alrededor de π/4) con un PD + compensación de gravedad en modo corriente, con
 la conversión NOMINAL fija en el código
 (alpha = 208.5 ticks/N·m, sin fricción ni offset): no hay que editar
-config/motorXM430W350T_params.yaml (del YAML solo se lee el bloque de
+config/control/motorXM430W350T_params.yaml (del YAML solo se lee el bloque de
 hardware) y no se necesita el nodo de Feedback Linearization.
 Protocolo completo: src/Identification/Ident_OpenManX_XM430W350T_procedure.md
 

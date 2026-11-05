@@ -2,7 +2,7 @@
 
 Este protocolo permite identificar, **en un robot OpenMANIPULATOR-X nuevo**, los
 parámetros del modelo torque→corriente de los 4 motores principales (IDs 11–14)
-y dejarlos listos en `config/motorXM430W350T_params.yaml`:
+y dejarlos listos en `config/control/motorXM430W350T_params.yaml`:
 
 ```
 I[i] = alpha[i]·tau[i] + Fv[i]·dq[i] + Fc[i]·tanh(dq[i]/eps) + I_offset[i]
@@ -130,7 +130,7 @@ Por qué cada parámetro exige SU método:
 
 > Los CSV se escriben en el **árbol fuente** del paquete
 > (`data/diagnostics/sinusoidal/`, `data/identification/alpha/`), y los nodos
-> leen `config/motorXM430W350T_params.yaml` **del árbol fuente al lanzarse**:
+> leen `config/control/motorXM430W350T_params.yaml` **del árbol fuente al lanzarse**:
 > editar ese YAML **no requiere recompilar**.
 
 ---
@@ -280,7 +280,7 @@ compensación de gravedad** del URDF, en modo corriente y con la **conversión
 nominal fija en el código** (α = 208.5 ticks/N·m, sin fricción ni offset). Del
 YAML de motor solo lee el bloque de hardware (ceros, signos, límites). Por eso:
 
-- **no hay que editar** `config/motorXM430W350T_params.yaml` (da igual qué α
+- **no hay que editar** `config/control/motorXM430W350T_params.yaml` (da igual qué α
   tenga en ese momento);
 - **no se necesita el nodo de Feedback Linearization**;
 - el resultado no depende del modelo que use el nodo (no hay circularidad).
@@ -374,12 +374,12 @@ joint — si re-grabó alguno, ponga el nuevo; p.ej. con el J3 re-grabado de 3.3
 El script valida los veredictos de todos los fragmentos (aborta si alguno quedó
 en RE-EJECUTAR), verifica que α esté en `208.5/(1 ± 0.10)`, copia el bloque de
 hardware del YAML oficial actual y escribe
-`config/motorXM430W350T_params_identified.yaml` con una tabla comparativa
+`config/identification/motorXM430W350T_params_identified.yaml` con una tabla comparativa
 actual↔nuevo. Si el fragmento de α fue generado por la versión anterior de
 `identify_alpha.py`, pide volver a analizar el log. Revíselo y actívelo:
 
 ```bash
-cp config/motorXM430W350T_params_identified.yaml config/motorXM430W350T_params.yaml
+cp config/identification/motorXM430W350T_params_identified.yaml config/control/motorXM430W350T_params.yaml
 ```
 
 Luego pase la fricción nueva al URDF estático (`urdf/open_manipulator_x.urdf`):
@@ -467,13 +467,13 @@ src/Identification/
 
 launch/friction_sweep.launch.py      barrido de fricción por articulación
 launch/alpha_ident.launch.py         ensayo de α (Paso 2)
-config/hw_friction_sweep_params.yaml parámetros del barrido (vel_list, banda…)
-config/hw_sinusoidal_torque_params.yaml  parámetros generales del nodo de excitación
-config/motorXM430W350T_params.yaml   ← DESTINO FINAL del modelo
+config/identification/hw_friction_sweep_params.yaml parámetros del barrido (vel_list, banda…)
+config/identification/hw_sinusoidal_torque_params.yaml  parámetros generales del nodo de excitación
+config/control/motorXM430W350T_params.yaml   ← DESTINO FINAL del modelo
 urdf/open_manipulator_x.urdf         <dynamics> de joint1..4 (update_urdf_friction.py)
 
 data/diagnostics/sinusoidal/hw_sin_torque_<id>.csv   logs de barridos
 data/identification/alpha/hw_alpha_ident_<id>.csv    logs del ensayo de α
 data/identification/*.yaml                           fragmentos (entrada del ensamblador)
-config/motorXM430W350T_params_identified.yaml        YAML ensamblado (revisar y copiar)
+config/identification/motorXM430W350T_params_identified.yaml        YAML ensamblado (revisar y copiar)
 ```

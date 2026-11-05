@@ -110,7 +110,7 @@ struct Calibration
 };
 
 // Declara joint_zero_tick, encoder_sign y current_sign tomando como valor por
-// defecto los de config/motorXM430W350T_params.yaml, aunque el nodo no cargue
+// defecto los de config/control/motorXM430W350T_params.yaml, aunque el nodo no cargue
 // ese YAML (asi todos los nodos usan la misma calibracion).
 Calibration declareCalibration(rclcpp::Node & node);
 
@@ -128,7 +128,7 @@ private:
   rclcpp::Logger logger_;
 };
 
-// Valor de un parametro de config/motorXM430W350T_params.yaml (o fallback si no existe)
+// Valor de un parametro de config/control/motorXM430W350T_params.yaml (o fallback si no existe)
 std::vector<double> motorYamlDoubles(const std::string & name, const std::vector<double> & fallback);
 std::vector<int64_t> motorYamlIntegers(const std::string & name, const std::vector<int64_t> & fallback);
 int64_t motorYamlInteger(const std::string & name, int64_t fallback);

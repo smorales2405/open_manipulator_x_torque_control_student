@@ -10,7 +10,7 @@
 #   4. [OnProcessExit jsb]    → arm_effort_controller + gripper_controller
 #
 # Posicion inicial del robot:
-#   Controlada por  config/sim_init_config.yaml
+#   Controlada por  config/control/sim_init_config.yaml
 #     use_fixed_init: false → equilibrio bajo gravedad sin torques (por defecto)
 #     use_fixed_init: true  → posicion articular fija dada por q_init
 #
@@ -49,9 +49,9 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def _load_init_config():
-    """Lee config/sim_init_config.yaml y devuelve configuracion completa de simulacion."""
+    """Lee config/control/sim_init_config.yaml y devuelve configuracion completa de simulacion."""
     pkg_share = get_package_share_directory('open_manipulator_x_torque_control')
-    cfg_path  = os.path.join(pkg_share, 'config', 'sim_init_config.yaml')
+    cfg_path  = os.path.join(pkg_share, 'config', 'control', 'sim_init_config.yaml')
     with open(cfg_path, 'r') as f:
         cfg = yaml.safe_load(f)
     use_fixed          = 'true' if cfg.get('use_fixed_init', False) else 'false'

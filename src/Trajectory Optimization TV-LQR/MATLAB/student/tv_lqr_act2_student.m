@@ -86,7 +86,7 @@ dq_max  = 10;
 
 % Centro del arco en marco link1 = pose Gazebo (marco mundo, centro del STL)
 % + offset mundo→link1 (xacro world_fixed: link1 en mundo (-0.127, 0, +0.010)).
-OBS_GZ_X = 0.1125;   % [m] obstacle_pose x en config/sim_init_config.yaml
+OBS_GZ_X = 0.1125;   % [m] obstacle_pose x en config/control/sim_init_config.yaml
 X_W2L1   = 0.127;    % [m] offset mundo→link1 en x
 
 x_obs  = OBS_GZ_X + X_W2L1;   % 0.2395 m — centro X en marco link1

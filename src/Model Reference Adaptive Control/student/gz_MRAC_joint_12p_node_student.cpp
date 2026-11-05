@@ -127,7 +127,7 @@ static constexpr int IDX_FC    = 8;   // [8..11] Fc1..Fc4
 //  [SECCION 3] Friccion nominal identificada — COMPLETAR
 //
 //  Valores por junta en DOMINIO DE TORQUE, derivados de la identificacion
-//  del motor (config/motorXM430W350T_params.yaml):
+//  del motor (config/control/motorXM430W350T_params.yaml):
 //    Fv = motor_Fv / motor_alpha   [N·m·s/rad]
 //    Fc = motor_Fc / motor_alpha   [N·m]
 //  Son los mismos valores de <dynamics damping/friction> del Xacro a escala
