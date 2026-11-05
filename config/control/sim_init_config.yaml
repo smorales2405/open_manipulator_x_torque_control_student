@@ -13,7 +13,9 @@
 #   Home (todos cero)  : use_fixed_init: true    q_init: [0.0, 0.0, 0.0, 0.0]
 
 use_fixed_init: true
-q_init: [0.0, 0.86, 0.57, -1.57]           # FL, SMC, MRAC: 
+# FL, SMC, MRAC: apoyado en la placa base. Sin torque cae a [0, 0.935, 0.35, -1.496],
+# dentro del rango de config/control/hw_initial_pose.yaml.
+q_init: [0.0, 0.931, 0.35, -1.49]
 
 #q_init: [1.5708, 0.0, 0.5236, 1.0472]     # TV-LQR: Posicion articular inicial
 

@@ -340,13 +340,13 @@ load_x_offset: 0.015   # [m]
 
 | Experiment | `use_fixed_init` | `q_init` | Notes |
 |---|---|---|---|
-| Feedback Linearization | `true` | `[0,0,0,0]` or free | Nominal plant |
+| Feedback Linearization | `true` | `[0.0, 0.931, 0.35, -1.49]` | Nominal plant |
 | TV-LQR Act. 1 | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: false` |
 | TV-LQR Act. 2 | `true` | `[1.5708, 0.0, 0.5236, 1.0472]` | `spawn_obstacle: true` |
-| SMC Articular | `true` | `[0.0, 0.91, 0.54, -1.68]` | Nominal: `mass_inertia_scale: 1.0` |
-| SMC Articular — incertidumbre | `true` | `[0.0, 0.91, 0.54, -1.68]` | `mass_inertia_scale: 1.2`, `damping_scale: 1.1` |
-| SMC Articular — carga | `true` | `[0.0, 0.91, 0.54, -1.68]` | `spawn_load: true` |
-| SMC Cartesiano | `true` | `[0.0, 0.91, 0.54, -1.68]` | Same scales and load options as the joint-space node |
+| SMC Articular | `true` | `[0.0, 0.931, 0.35, -1.49]` | Nominal: `mass_inertia_scale: 1.0` |
+| SMC Articular — incertidumbre | `true` | `[0.0, 0.931, 0.35, -1.49]` | `mass_inertia_scale: 1.2`, `damping_scale: 1.1` |
+| SMC Articular — carga | `true` | `[0.0, 0.931, 0.35, -1.49]` | `spawn_load: true` |
+| SMC Cartesiano | `true` | `[0.0, 0.931, 0.35, -1.49]` | Same scales and load options as the joint-space node |
 
 ---
 
