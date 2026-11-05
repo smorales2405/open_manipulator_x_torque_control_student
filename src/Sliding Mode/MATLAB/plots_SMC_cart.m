@@ -32,9 +32,6 @@ EXPORT_FIGS = false;    % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi
 
 TAU_MAX     = 1.2;      % [N·m] limite de torque (debe coincidir con el nodo)
 
-T_TRANS_S   = 5.0;      % [s] transicion quintica del nodo hw (debe coincidir);
-                        % en modo 'real' se descartan las muestras t < T_TRANS_S
-
 % Directorio raiz del paquete ROS 2
 pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   % raiz del paquete (relativa a este script)
 
@@ -46,12 +43,14 @@ switch mode
         output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim', 'act2', ...
                               sprintf('test%d_%s', test_num, rho_func));
         mode_label = 'Simulacion';
+        T_TRANS_S  = 3.0;   % [s] transicion quintica de gz_SMC_cart (debe coincidir)
     case 'real'
         csv_file   = fullfile(pkg_dir, 'data', 'smc', 'real', 'act2', ...
                               sprintf('hw_smc_cart_%s_%d.csv', rho_func, test_num));
         output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act2', ...
                               sprintf('test%d_%s', test_num, rho_func));
         mode_label = 'Implementacion';
+        T_TRANS_S  = 5.0;   % [s] transicion quintica de hw_SMC_cart (debe coincidir)
     otherwise
         error('mode debe ser ''sim'' o ''real''.');
 end
@@ -64,13 +63,11 @@ T = readtable(csv_file);
 fprintf('[%s | rho=%s | test=%d]  Cargado: %s  (%d muestras)\n', ...
         mode_label, rho_func, test_num, csv_file, height(T));
 
-% El CSV de hardware incluye la transicion quintica (diagnostico de fallas):
-% descartarla para que metricas y graficas sean solo de seguimiento
-if strcmp(mode, 'real')
-    T = T(T.t >= T_TRANS_S, :);
-    fprintf('  (modo real: descartadas muestras t < %.1f s de transicion; quedan %d)\n', ...
-            T_TRANS_S, height(T));
-end
+% El CSV incluye la transicion quintica (diagnostico de fallas): descartarla
+% para que metricas y graficas sean solo de seguimiento
+T = T(T.t >= T_TRANS_S, :);
+fprintf('  (descartadas muestras t < %.1f s de transicion; quedan %d)\n', ...
+        T_TRANS_S, height(T));
 
 t = T.t - T.t(1);
 

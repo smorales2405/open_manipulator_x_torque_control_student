@@ -55,7 +55,7 @@
 //
 //  Parametros ROS 2:
 //    test_num  [int]     1        — identificador del CSV
-//    t_run     [double]  0.0      — duracion SMC en segundos (0 = ilimitado, sin retorno); total =
+//    t_run     [double]  0.0      — duracion del seguimiento en segundos (0 = ilimitado, sin retorno); total =
 //                                   T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S.
 //                                   Al terminar, el nodo se cierra solo.
 //    rho_func  [string]  "sat"    — funcion de conmutacion: "sat" | "sign"
@@ -72,7 +72,8 @@
 //  Nota: usar sim_init_config.yaml con use_fixed_init: true y escalas nominales
 //        mass_inertia/damping/friction = 1.0 (la friccion del feedforward debe
 //        coincidir con la de la planta: friction_scale 0.0 NO es valido aqui).
-//        El CSV almacena unicamente datos de la fase de seguimiento SMC.
+//        El CSV almacena la transicion y el seguimiento, sin retorno ni pausa;
+//        los scripts plots_SMC_* descartan t < T_TRANS para las metricas.
 //
 //  Ejemplos de uso:
 //
@@ -344,7 +345,7 @@ public:
       Y_START[0], Y_START[1], Y_START[2], Y_START[3]);
     if (t_run_ > 0.0) {
       RCLCPP_INFO(this->get_logger(),
-        "t_run (SMC) = %.1f s  |  total = %.1f s (T_trans=%.1f + t_run=%.1f + retorno=%.1f + pausa=%.1f)",
+        "t_run (seguimiento) = %.1f s  |  total = %.1f s (T_trans=%.1f + t_run=%.1f + retorno=%.1f + pausa=%.1f)",
         t_run_, T_TRANS + t_run_ + RETURN_TIME_S + HOLD_TIME_S, T_TRANS, t_run_, RETURN_TIME_S, HOLD_TIME_S);
     } else {
       RCLCPP_INFO(this->get_logger(), "t_run = ilimitado");
@@ -544,8 +545,8 @@ private:
       phase, t_, s_y.norm(), e_y.norm(), cond_J,
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
-    // 15. Registro CSV (solo fase SMC, sin transicion, retorno ni pausa)
-    if (in_tracking && csv_.is_open()) {
+    // 15. Registro CSV (transicion y seguimiento, sin retorno ni pausa)
+    if ((in_trans || in_tracking) && csv_.is_open()) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
            << ',' << q[0]           << ',' << q[1]           << ',' << q[2]           << ',' << q[3]

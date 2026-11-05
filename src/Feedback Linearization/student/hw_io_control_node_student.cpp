@@ -30,7 +30,7 @@
  *   - Saturacion defensiva del torque a +/-tau_max antes de enviar corriente
  *   - Guardas de altura minima Z_MIN_FLOOR (referencia y efector medido)
  *   - Retorno articular al reposo en la pose inicial (omx::JointReturn) al
- *     completar t_run + pausa en reposo antes de cortar corriente
+ *     terminar el seguimiento + pausa en reposo antes de cortar corriente
  *   - Verificacion de limites articulares y de corriente medida (parada de emergencia)
  *   - Deteccion de overruns del lazo de control
  *   - Publicador /hw/joint_states y escritura de CSV (el retorno final y la
@@ -43,7 +43,8 @@
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
  *   port_name              [string]   "/dev/ttyUSB0"
  *   gain_scale             [double]   1.0    (escala de ganancias)
- *   t_run                  [double]   20.0   (duracion; 0 = sin limite)
+ *   t_run                  [double]   20.0   (duracion del SEGUIMIENTO [s], sin la
+ *                                             transicion ni el retorno; 0 = sin limite)
  *   test_num               [int]      1
  *   ab_alpha               [double]   0.2    (filtro alpha-beta: ganancia de posicion)
  *   ab_beta                [double]   0.02   (filtro alpha-beta: ganancia de velocidad)
@@ -215,7 +216,7 @@ public:
     loop_rate_hz_ = std::min(std::max(get_parameter("loop_rate_hz").as_double(), 50.0), 400.0);
     Ts_ = 1.0 / loop_rate_hz_;
 
-    RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  dur=%.1fs  id=%d",
+    RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  t_run(seguimiento)=%.1fs  test=%d",
       port_name_.c_str(), gain_scale_, t_run_, test_num);
     RCLCPP_INFO(get_logger(),
       "Kp_y=[%.1f %.1f %.1f %.1f]  Kd_y=[%.1f %.1f %.1f %.1f]  lambda=%.3f  tau_max=%.2f",
@@ -405,7 +406,7 @@ private:
     const auto   tp = std::chrono::high_resolution_clock::now();
     const double t  = std::chrono::duration<double>(tp - start_time_).count();
 
-    const double t_shutdown = t_run_ + RETURN_TIME_S + HOLD_TIME_S;
+    const double t_shutdown = T_TRANS + t_run_ + RETURN_TIME_S + HOLD_TIME_S;
     if (t_run_ > 0.0 && t >= t_shutdown) {
       RCLCPP_INFO(get_logger(), "Retorno a q_inicial completado. Deteniendo (t=%.1f s).", t);
       timer_->cancel();
@@ -465,7 +466,7 @@ private:
     //    retorno final articular). En el retorno y la pausa ref.y guarda la pose
     //    cartesiana (FK) de la referencia articular ref_q, para la guarda de
     //    altura y el log.
-    const bool returning = (t_run_ > 0.0 && t >= t_run_);
+    const bool returning = (t_run_ > 0.0 && t >= T_TRANS + t_run_);
     CartRef ref;
     omx::Reference ref_q{q, Vec4::Zero(), Vec4::Zero()};
     if (t < T_TRANS) {
@@ -473,14 +474,14 @@ private:
     } else if (!returning) {
       ref = cartesianTrajectory(t - T_TRANS);
     } else {
-      // Retorno articular: quintica desde la pose medida en t_run hasta
-      // q_inicial en reposo, y luego pausa en reposo en q_inicial
+      // Retorno articular: quintica desde la pose medida al terminar el
+      // seguimiento hasta q_inicial en reposo, y luego pausa en reposo en q_inicial
       if (!ret_.started()) {
         ret_.start(q);
         RCLCPP_INFO(get_logger(), "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)",
           t, RETURN_TIME_S);
       }
-      ref_q = ret_.reference(t - t_run_);
+      ref_q = ret_.reference(t - (T_TRANS + t_run_));
       const Eigen::Vector3d p_ref = model_.eePosition(ref_q.q);
       ref.y << p_ref[0], p_ref[1], p_ref[2], ref_q.q[1] + ref_q.q[2] + ref_q.q[3];
       ref.ydot.setZero();
@@ -491,7 +492,7 @@ private:
     //     Cerca de la pose inicial (transicion de entrada, retorno final o
     //     pausa en reposo) el brazo puede estar bajo (y0_[2] < Z_MIN_FLOOR):
     //     solo se exige no descender mas de 3 cm bajo la pose inicial.
-    const bool near_home = (t < T_TRANS) || (t_run_ > 0.0 && t >= t_run_);
+    const bool near_home = (t < T_TRANS) || (t_run_ > 0.0 && t >= T_TRANS + t_run_);
     const double z_floor = near_home
       ? std::min(Z_MIN_FLOOR, y0_[2] - 0.03)
       : Z_MIN_FLOOR;
@@ -552,7 +553,7 @@ private:
 
     // 11. CSV (excluye el retorno final a q_inicial y la pausa en reposo,
     //     asi el CSV solo cubre transicion inicial + trayectoria periodica)
-    const bool in_return_or_hold = (t_run_ > 0.0 && t >= t_run_);
+    const bool in_return_or_hold = (t_run_ > 0.0 && t >= T_TRANS + t_run_);
     if (csv_.is_open() && !in_return_or_hold) {
       csv_ << std::fixed << std::setprecision(6)
            << t
@@ -580,8 +581,8 @@ private:
     if (++log_cnt_ % static_cast<int>(std::lround(loop_rate_hz_)) == 0) {
       if (csv_.is_open()) csv_.flush();
       const char* phase = (t < T_TRANS) ? "TRANS" :
-                          (t_run_ <= 0.0 || t < t_run_) ? "TRAJ " :
-                          (t < t_run_ + RETURN_TIME_S)  ? "RET  " : "HOME ";
+                          (t_run_ <= 0.0 || t < T_TRANS + t_run_) ? "TRAJ " :
+                          (t < T_TRANS + t_run_ + RETURN_TIME_S) ? "RET  " : "HOME ";
       RCLCPP_INFO(get_logger(),
         "[%s] t=%.2fs  y=[%.3f %.3f %.3f %.3f]  |ey|=%.4f  detJ=%.4f",
         phase, t,

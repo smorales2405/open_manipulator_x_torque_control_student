@@ -92,8 +92,8 @@
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
  *   port_name          [string]  "/dev/ttyUSB0"
  *   gain_scale         [double]  1.0    (escala K_V y K_S; K_I con su cuadrado; Lambda fija)
- *   t_run              [double]  20.0   (duracion del SEGUIMIENTO [s];
- *                                        total = T_TRANS + t_run)
+ *   t_run              [double]  20.0   (duracion del SEGUIMIENTO [s]; total =
+ *                                        T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S)
  *   test_num           [int]     1      (CSV: hw_smc_cart_sat_<test_num>.csv)
  *   phi                [double]  0.3    (capa limite para sat(s/phi) [m/s o rad/s])
  *   integral           [bool]    false  (activa el termino integral z)

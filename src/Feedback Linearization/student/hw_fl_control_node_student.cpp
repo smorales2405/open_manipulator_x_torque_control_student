@@ -23,8 +23,8 @@
  *     DESEADA 
  *   - Saturacion del torque a +/-tau_max antes de enviar corriente
  *   - Transicion quintica de 3 s desde la posicion inicial hasta el inicio de la trayectoria
- *   - Retorno articular al reposo en q_inicial (omx::JointReturn) al completar
- *     t_run + pausa en reposo antes de cortar corriente
+ *   - Retorno articular al reposo en q_inicial (omx::JointReturn) al terminar
+ *     el seguimiento + pausa en reposo antes de cortar corriente
  *   - Verificacion de limites articulares y de corriente medida (parada de emergencia)
  *   - Deteccion de overruns del lazo de control
  *   - Publicador /hw/joint_states y escritura de CSV (el retorno final y la
@@ -37,7 +37,8 @@
  * Parametros ROS 2 (--ros-args -p nombre:=valor):
  *   port_name              [string]   "/dev/ttyUSB0"
  *   gain_scale             [double]   1.0    (escala lineal de Kp; Kd escala con sqrt)
- *   t_run                  [double]   20.0   (duracion; 0 = sin limite)
+ *   t_run                  [double]   20.0   (duracion del SEGUIMIENTO [s], sin la
+ *                                             transicion ni el retorno; 0 = sin limite)
  *   test_num               [int]      1
  *   ab_alpha               [double]   0.2    (filtro alpha-beta: ganancia de posicion)
  *   ab_beta                [double]   0.02   (filtro alpha-beta: ganancia de velocidad)
@@ -195,7 +196,7 @@ public:
     loop_rate_hz_ = std::min(std::max(get_parameter("loop_rate_hz").as_double(), 50.0), 400.0);
     Ts_ = 1.0 / loop_rate_hz_;
 
-    RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  dur=%.1fs  id=%d",
+    RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  t_run(seguimiento)=%.1fs  test=%d",
       port_name_.c_str(), gain_scale_, t_run_, test_num);
     RCLCPP_INFO(get_logger(),
       "motor alpha=[%.1f %.1f %.1f %.1f]  Fv=[%.2f %.2f %.2f %.2f]  epsilon=%.3f",
@@ -326,7 +327,7 @@ private:
     const auto   tp = std::chrono::high_resolution_clock::now();
     const double t  = std::chrono::duration<double>(tp - start_time_).count();
 
-    const double t_shutdown = t_run_ + RETURN_TIME_S + HOLD_TIME_S;
+    const double t_shutdown = RAMP_TIME_S + t_run_ + RETURN_TIME_S + HOLD_TIME_S;
     if (t_run_ > 0.0 && t >= t_shutdown) {
       RCLCPP_INFO(get_logger(), "Retorno a q_inicial completado. Deteniendo (t=%.1f s).", t);
       timer_->cancel();
@@ -370,16 +371,16 @@ private:
     }
 
     // 4. Referencia (transicion quintica + trayectoria + retorno articular final)
-    const bool returning = (t_run_ > 0.0 && t >= t_run_);
+    const bool returning = (t_run_ > 0.0 && t >= RAMP_TIME_S + t_run_);
     Reference ref;
     if (returning) {
-      // Quintica desde la pose medida en t_run hasta q_inicial en reposo
+      // Quintica desde la pose medida al terminar el seguimiento hasta q_inicial en reposo
       if (!ret_.started()) {
         ret_.start(q);
         RCLCPP_INFO(get_logger(), "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)",
           t, RETURN_TIME_S);
       }
-      ref = ret_.reference(t - t_run_);
+      ref = ret_.reference(t - (RAMP_TIME_S + t_run_));
     } else if (t < RAMP_TIME_S) {
       ref = omx::quinticTransition(t, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
     } else {

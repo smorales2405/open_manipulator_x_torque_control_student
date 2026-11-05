@@ -1,4 +1,4 @@
-La%% plots_SMC_comp_cart.m
+%% plots_SMC_comp_cart.m
 % Graficas COMPARATIVAS — Control SMC Cartesiano (sign vs sat)
 % OpenMANIPULATOR-X, Sliding Mode Control — Actividad 2
 %
@@ -34,11 +34,13 @@ switch mode
         output_dir = fullfile(pkg_dir, 'plots', 'smc', 'sim',  'act2', 'comp_sf');
         mode_label = 'Simulacion';
         prefix     = 'gz_smc_cart';
+        T_TRANS_S  = 3.0;   % [s] transicion quintica de gz_SMC_cart (debe coincidir)
     case 'real'
         data_dir   = fullfile(pkg_dir, 'data',  'smc', 'real', 'act2');
         output_dir = fullfile(pkg_dir, 'plots', 'smc', 'real', 'act2', 'comp_sf');
         mode_label = 'Implementacion';
         prefix     = 'hw_smc_cart';
+        T_TRANS_S  = 5.0;   % [s] transicion quintica de hw_SMC_cart (debe coincidir)
     otherwise
         error('mode debe ser ''sim'' o ''real''.');
 end
@@ -56,6 +58,7 @@ for k = 1:2
         error('Archivo no encontrado:\n  %s\nVerificar mode y test_num_%s.', fpath, rho);
     end
     Tk = readtable(fpath);
+    Tk = Tk(Tk.t >= T_TRANS_S, :);   % sin la transicion quintica: metricas y graficas solo de seguimiento
     fprintf('[%s | rho=%s | test=%d]  Cargado: %d muestras\n', ...
             mode_label, rho, tnum, height(Tk));
 

@@ -29,8 +29,8 @@ EXPORT_FIGS = false;    % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi
 
 TAU_MAX     = 1.2;      % [N·m] limite de torque (debe coincidir con el nodo)
 
-T_TRANS_S   = 3.0;      % [s] transicion quintica del nodo hw (debe coincidir);
-                        % en modo 'real' se descartan las muestras t < T_TRANS_S
+T_TRANS_S   = 3.0;      % [s] transicion quintica de los nodos gz y hw (debe coincidir);
+                        % se descartan las muestras t < T_TRANS_S
 
 % Directorio raiz del paquete ROS 2
 pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   % raiz del paquete (relativa a este script)
@@ -61,13 +61,11 @@ T = readtable(csv_file);
 fprintf('[%s | rho=%s | test=%d]  Cargado: %s  (%d muestras)\n', ...
         mode_label, rho_func, test_num, csv_file, height(T));
 
-% El CSV de hardware incluye la transicion quintica (diagnostico de fallas):
-% descartarla para que metricas y graficas sean solo de seguimiento
-if strcmp(mode, 'real')
-    T = T(T.t >= T_TRANS_S, :);
-    fprintf('  (modo real: descartadas muestras t < %.1f s de transicion; quedan %d)\n', ...
-            T_TRANS_S, height(T));
-end
+% El CSV incluye la transicion quintica (diagnostico de fallas): descartarla
+% para que metricas y graficas sean solo de seguimiento
+T = T(T.t >= T_TRANS_S, :);
+fprintf('  (descartadas muestras t < %.1f s de transicion; quedan %d)\n', ...
+        T_TRANS_S, height(T));
 
 t      = T.t - T.t(1);
 

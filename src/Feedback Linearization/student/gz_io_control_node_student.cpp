@@ -31,12 +31,14 @@
 //    - Suscriptor /joint_states  →  q, dq
 //    - Publicador /arm_effort_controller/commands  →  tau
 //    - Retorno articular suave (5to orden, omx::JointReturn) a la pose inicial
-//      al cumplirse t_run + pausa en reposo antes de soltar el torque: el
-//      robot queda en la pose de partida y el nodo se puede volver a ejecutar
+//      al terminar el seguimiento + pausa en reposo antes de soltar el torque:
+//      el robot queda en la pose de partida y el nodo se puede volver a ejecutar
 //      sobre el mismo Gazebo
 //    - Escritura de CSV:  gz_io_data_<test_num>.csv (sin el retorno final)
-//    - Timer de control a 200 Hz (igual que los nodos hw_)
-//    - Parametros ROS:  test_num, t_run
+//    - Timer de control a 200 Hz de tiempo simulado, sobre /clock de Gazebo
+//      (use_sim_time=true): t_run y el CSV quedan en segundos simulados
+//    - Parametros ROS:  test_num, t_run (duracion del seguimiento [s], sin la
+//      transicion ni el retorno; 0 = ilimitado)
 //
 //  Ejemplo de ejecucion (con la simulacion Gazebo ya lanzada):
 //    ros2 launch open_manipulator_x_torque_control torque_sim.launch.py
@@ -80,6 +82,8 @@ static constexpr char EFF_FRAME[] = "end_effector_link";
 // Suavizado del tanh en el feedforward de friccion de Coulomb [rad/s]
 // (usa la velocidad DESEADA, senal sin ruido: eps pequeno es seguro)
 static constexpr double FRIC_EPS = 0.05;
+
+static constexpr double DT = 0.005;   // [s] periodo de control (200 Hz simulados)
 
 // Duracion del retorno final a la pose inicial y de la pausa en reposo antes
 // de soltar el torque [s] (infraestructura)
@@ -161,6 +165,9 @@ public:
   IOControlNode()
   : Node("gz_io_control_node"), t_(0.0), y0_initialized_(false)
   {
+    // Reloj de simulacion: el timer avanza con /clock de Gazebo
+    this->set_parameter(rclcpp::Parameter("use_sim_time", true));
+
     this->declare_parameter<int>("test_num", 1);
     const int test_num = this->get_parameter("test_num").as_int();
 
@@ -194,7 +201,11 @@ public:
     RCLCPP_INFO(this->get_logger(),
       "lambda=%.3f  T_trans=%.1f s", LAMBDA, T_TRANS);
     if (t_run_ > 0.0) {
-      RCLCPP_INFO(this->get_logger(), "Tiempo de simulacion: %.1f s", t_run_);
+      RCLCPP_INFO(this->get_logger(),
+        "t_run (seguimiento) = %.1f s  |  total = %.1f s (T_trans=%.1f + t_run=%.1f + retorno=%.1f + pausa=%.1f)",
+        t_run_, T_TRANS + t_run_ + RETURN_TIME_S + HOLD_TIME_S, T_TRANS, t_run_, RETURN_TIME_S, HOLD_TIME_S);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "t_run = ilimitado  (T_trans=%.1f s)", T_TRANS);
     }
 
     open_csv(test_num);
@@ -202,8 +213,10 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    // Lazo de control a 200 Hz (dt = 5 ms), igual que el nodo hw
-    timer_ = this->create_wall_timer(5ms, [this]() { tick(); });
+    // Lazo de control a 200 Hz simulados, sobre /clock de Gazebo
+    timer_ = rclcpp::create_timer(
+      this, this->get_clock(), rclcpp::Duration::from_seconds(DT),
+      [this]() { tick(); });
   }
 
   ~IOControlNode()
@@ -281,13 +294,13 @@ private:
 
     // ── 6. Referencia segun fase ──────────────────────────────────────────
     // [0, T_TRANS)                  : transicion suave desde la pose inicial hasta Y_START
-    // [T_TRANS, t_run)              : trayectoria definida en circularTrajectory()
-    // [t_run, t_run+RETURN_TIME_S)  : retorno articular suave a la pose inicial
-    // [t_run+RETURN_TIME_S, ...)    : pausa en reposo en la pose inicial (luego torque cero)
+    // [T_TRANS, T_TRANS+t_run)      : trayectoria definida en circularTrajectory()
+    // [T_TRANS+t_run, +RETURN_TIME_S) : retorno articular suave a la pose inicial
+    // [..., +HOLD_TIME_S)           : pausa en reposo en la pose inicial (luego torque cero)
     // En el retorno y la pausa la referencia es articular (ref_q); ref.y guarda
     // su pose cartesiana (FK) para que la Seccion 3 reciba una referencia valida
     // (su par se descarta en el retorno).
-    const bool returning = (t_run_ > 0.0 && t_ >= t_run_);
+    const bool returning = (t_run_ > 0.0 && t_ >= T_TRANS + t_run_);
     CartRef ref;
     omx::Reference ref_q{q, Eigen::Vector4d::Zero(), Eigen::Vector4d::Zero()};
     if (t_ < T_TRANS) {
@@ -300,7 +313,7 @@ private:
         RCLCPP_INFO(this->get_logger(),
           "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
       }
-      ref_q = ret_.reference(t_ - t_run_);
+      ref_q = ret_.reference(t_ - (T_TRANS + t_run_));
       const Eigen::Vector3d p_ref = model_.eePosition(ref_q.q);
       ref.y << p_ref[0], p_ref[1], p_ref[2], ref_q.q[1] + ref_q.q[2] + ref_q.q[3];
       ref.ydot.setZero();
@@ -330,8 +343,8 @@ private:
     // ══════════════════════════════════════════════════════════════════════
 
     // ── Retorno final a la pose inicial (infraestructura, NO modificar) ────
-    //  Desde t_run el par lo da el retorno articular (omx::JointReturn); el
-    //  par de la ley de control de la Seccion 3 se descarta.
+    //  Al terminar el seguimiento el par lo da el retorno articular
+    //  (omx::JointReturn); el par de la ley de control de la Seccion 3 se descarta.
     if (returning) {
       tau_sat = ret_.torque(model_, q, dq, ref_q);
     }
@@ -361,15 +374,15 @@ private:
     torque_pub_->publish(cmd);
 
     const char * phase = (t_ < T_TRANS) ? "TRANS" :
-                         (t_run_ <= 0.0 || t_ < t_run_) ? "CIRC " :
-                         (t_ < t_run_ + RETURN_TIME_S)  ? "RET  " : "HOME ";
+                         (t_run_ <= 0.0 || t_ < T_TRANS + t_run_) ? "CIRC " :
+                         (t_ < T_TRANS + t_run_ + RETURN_TIME_S) ? "RET  " : "HOME ";
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
       "[%s] t=%.2fs  y=[%.3f %.3f %.3f %.3f]  tau=[%.3f %.3f %.3f %.3f]",
       phase, t_, y[0], y[1], y[2], y[3],
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
     // ── 8. CSV (excluye el retorno final y la pausa en reposo) ────────────
-    const bool in_return_or_hold = (t_run_ > 0.0 && t_ >= t_run_);
+    const bool in_return_or_hold = (t_run_ > 0.0 && t_ >= T_TRANS + t_run_);
     if (csv_.is_open() && !in_return_or_hold) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
@@ -382,11 +395,11 @@ private:
            << '\n';
     }
 
-    t_ += 0.005;   // Ts del lazo de 200 Hz
+    t_ += DT;
 
     // ── 9. Fin: tras el retorno y la pausa se suelta el torque (el robot ──
     //       queda en la pose de partida, listo para otra ejecucion)
-    if (t_run_ > 0.0 && t_ >= t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
+    if (t_run_ > 0.0 && t_ >= T_TRANS + t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
       RCLCPP_INFO(this->get_logger(),
         "Retorno a q_inicial completado (t=%.1f s). Deteniendo control.", t_);
       std_msgs::msg::Float64MultiArray zero;

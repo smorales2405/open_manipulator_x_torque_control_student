@@ -27,8 +27,9 @@
 //  Transicion inicial: quintica generalizada de duracion T_TRANS desde la
 //  pose medida al arrancar (el brazo cae por gravedad entre el spawn de
 //  Gazebo y el inicio del nodo) hasta q_d(0), empalmando posicion, velocidad
-//  Y aceleracion con la trayectoria (empalme C2). El CSV registra solo la
-//  fase de seguimiento.
+//  Y aceleracion con la trayectoria (empalme C2). El CSV registra la
+//  transicion y el seguimiento, sin retorno ni pausa; los scripts plots_SMC_*
+//  descartan t < T_TRANS para que las metricas sean solo de seguimiento.
 //
 //  Fases (con t_run = 0 no hay limite ni retorno):
 //    [0, T_TRANS)                     transicion quintica hasta q_d(0)
@@ -462,8 +463,8 @@ private:
       phase, t_, s_q.norm(), e_q.norm(),
       tau_sat[0], tau_sat[1], tau_sat[2], tau_sat[3]);
 
-    // ── Registro CSV (solo fase de seguimiento, sin transicion, retorno ni pausa)
-    if (in_tracking && csv_.is_open()) {
+    // ── Registro CSV (transicion y seguimiento, sin retorno ni pausa)
+    if ((in_trans || in_tracking) && csv_.is_open()) {
       csv_ << std::fixed << std::setprecision(6)
            << t_
            << ',' << q[0]       << ',' << q[1]       << ',' << q[2]       << ',' << q[3]

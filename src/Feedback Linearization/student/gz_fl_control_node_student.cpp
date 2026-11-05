@@ -22,12 +22,14 @@
 //    - Rampa quintica de 3 s desde la pose inicial medida hasta el inicio de
 //      la trayectoria 
 //    - Retorno articular suave (5to orden, omx::JointReturn) a q_inicial al
-//      cumplirse t_run + pausa en reposo antes de soltar el torque: el robot
-//      queda en la pose de partida y el nodo se puede volver a ejecutar sobre
-//      el mismo Gazebo
+//      terminar el seguimiento + pausa en reposo antes de soltar el torque: el
+//      robot queda en la pose de partida y el nodo se puede volver a ejecutar
+//      sobre el mismo Gazebo
 //    - Escritura de CSV:  gz_fl_data_<test_num>.csv (sin el retorno final)
-//    - Timer de control a 200 Hz (igual que los nodos hw_)
-//    - Parametros ROS:  test_num, t_run
+//    - Timer de control a 200 Hz de tiempo simulado, sobre /clock de Gazebo
+//      (use_sim_time=true): t_run y el CSV quedan en segundos simulados
+//    - Parametros ROS:  test_num, t_run (duracion del seguimiento [s], sin la
+//      rampa ni el retorno; 0 = ilimitado)
 //
 //  Ejemplo de ejecucion (con la simulacion Gazebo ya lanzada):
 //    ros2 launch open_manipulator_x_torque_control torque_sim.launch.py
@@ -69,6 +71,8 @@ static constexpr int    NARM = 4;    // articulaciones controladas (joint1..join
 // Suavizado del tanh en el feedforward de friccion de Coulomb [rad/s]
 // (usa la velocidad DESEADA, senal sin ruido: eps pequeno es seguro)
 static constexpr double FRIC_EPS = 0.05;
+
+static constexpr double DT = 0.005;   // [s] periodo de control (200 Hz simulados)
 
 // Duraciones de la rampa inicial, del retorno final a q_inicial y de la pausa
 // en reposo antes de soltar el torque [s] (infraestructura)
@@ -138,6 +142,9 @@ public:
   FLControlNode()
   : Node("gz_fl_control_node"), t_(0.0)
   {
+    // Reloj de simulacion: el timer avanza con /clock de Gazebo
+    this->set_parameter(rclcpp::Parameter("use_sim_time", true));
+
     this->declare_parameter<int>("test_num", 1);
     const int test_num = this->get_parameter("test_num").as_int();
 
@@ -168,9 +175,11 @@ public:
       KP[0], KP[1], KP[2], KP[3],
       KD[0], KD[1], KD[2], KD[3], TAU_MAX);
     if (t_run_ > 0.0) {
-      RCLCPP_INFO(this->get_logger(), "Tiempo de simulacion: %.1f s", t_run_);
+      RCLCPP_INFO(this->get_logger(),
+        "t_run (seguimiento) = %.1f s  |  total = %.1f s (rampa=%.1f + t_run=%.1f + retorno=%.1f + pausa=%.1f)",
+        t_run_, RAMP_TIME_S + t_run_ + RETURN_TIME_S + HOLD_TIME_S, RAMP_TIME_S, t_run_, RETURN_TIME_S, HOLD_TIME_S);
     } else {
-      RCLCPP_INFO(this->get_logger(), "Tiempo de simulacion: ilimitado");
+      RCLCPP_INFO(this->get_logger(), "t_run = ilimitado  (rampa=%.1f s)", RAMP_TIME_S);
     }
 
     open_csv(test_num);
@@ -178,8 +187,10 @@ public:
     torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/arm_effort_controller/commands", 10);
 
-    // Lazo de control a 200 Hz (dt = 5 ms), igual que el nodo hw
-    timer_ = this->create_wall_timer(5ms, [this]() { tick(); });
+    // Lazo de control a 200 Hz simulados, sobre /clock de Gazebo
+    timer_ = rclcpp::create_timer(
+      this, this->get_clock(), rclcpp::Duration::from_seconds(DT),
+      [this]() { tick(); });
   }
 
   ~FLControlNode()
@@ -226,16 +237,16 @@ private:
 
     // Referencia: rampa quintica inicial + trayectoria deseada + retorno
     // articular a q_inicial + pausa en reposo (infraestructura)
-    const bool returning = (t_run_ > 0.0 && t_ >= t_run_);
+    const bool returning = (t_run_ > 0.0 && t_ >= RAMP_TIME_S + t_run_);
     Reference ref;
     if (returning) {
-      // Quintica desde la pose medida en t_run hasta q_inicial en reposo
+      // Quintica desde la pose medida al terminar el seguimiento hasta q_inicial en reposo
       if (!ret_.started()) {
         ret_.start(q);
         RCLCPP_INFO(this->get_logger(),
           "Iniciando retorno articular a q_inicial (t=%.1fs, dur=%.1fs)", t_, RETURN_TIME_S);
       }
-      ref = ret_.reference(t_ - t_run_);
+      ref = ret_.reference(t_ - (RAMP_TIME_S + t_run_));
     } else if (t_ < RAMP_TIME_S) {
       ref = omx::quinticTransition(t_, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
     } else {
@@ -267,8 +278,8 @@ private:
     // ══════════════════════════════════════════════════════════════════════
 
     // ── Retorno final a la pose inicial (infraestructura, NO modificar) ────
-    //  Desde t_run el par lo da el retorno articular (omx::JointReturn); el
-    //  de la Seccion 3 se descarta.
+    //  Al terminar el seguimiento el par lo da el retorno articular
+    //  (omx::JointReturn); el de la Seccion 3 se descarta.
     if (returning) {
       tau_sat = ret_.torque(model_, q, dq, ref);
     }
@@ -306,11 +317,11 @@ private:
            << '\n';
     }
 
-    t_ += 0.005;   // Ts del lazo de 200 Hz
+    t_ += DT;
 
     // ── 6. Fin: tras el retorno y la pausa se suelta el torque (el robot ──
     //       queda en la pose de partida, listo para otra ejecucion)
-    if (t_run_ > 0.0 && t_ >= t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
+    if (t_run_ > 0.0 && t_ >= RAMP_TIME_S + t_run_ + RETURN_TIME_S + HOLD_TIME_S) {
       RCLCPP_INFO(this->get_logger(),
         "Retorno a q_inicial completado (t=%.1f s). Deteniendo control.", t_);
       std_msgs::msg::Float64MultiArray zero;

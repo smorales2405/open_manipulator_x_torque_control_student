@@ -413,7 +413,7 @@ ros2 run open_manipulator_x_torque_control hw_fl_control_node_student \
 | Parameter | Description |
 |---|---|
 | `test_num` | Numeric ID appended to the output CSV filename |
-| `t_run` | Experiment duration in seconds |
+| `t_run` | Tracking duration in seconds (simulated seconds in `gz_` nodes), without the 3 s initial ramp or the final return; total runtime = 3 s + `t_run` + 3.5 s. `0` = no limit |
 
 Data saved to: `data/feedback_linearization/sim/act1/gz_fl_data_<N>.csv` and `data/feedback_linearization/real/act1/hw_fl_data_<N>.csv`
 
@@ -581,7 +581,7 @@ run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_joint.m')
 
 #### Activity 2 — Cartesian SMC
 
-The node performs a quintic transition of duration `T_trans = 3 s` before the SMC phase. `t_run` refers only to the SMC phase; total runtime = `T_trans + t_run` plus 3.5 s for the final return to the initial pose.
+The node performs a quintic transition of duration `T_trans = 3 s` before the SMC phase. `t_run` refers only to the tracking phase; total runtime = `T_trans + t_run` plus 3.5 s for the final return to the initial pose.
 
 ```bash
 # With sat(s/phi) (default, phi = 0.2)

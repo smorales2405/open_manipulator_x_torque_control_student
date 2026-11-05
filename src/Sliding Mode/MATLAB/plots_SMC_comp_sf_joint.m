@@ -25,6 +25,9 @@ EXPORT_FIGS = false;    % true = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
 
 TAU_MAX = 1.2;          % [N·m] limite de torque (debe coincidir con el nodo)
 
+T_TRANS_S = 3.0;        % [s] transicion quintica de los nodos gz y hw (debe coincidir);
+                        % se descartan las muestras t < T_TRANS_S
+
 pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   % raiz del paquete (relativa a este script)
 
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
@@ -56,6 +59,7 @@ for k = 1:2
         error('Archivo no encontrado:\n  %s\nVerificar mode y test_num_%s.', fpath, rho);
     end
     Tk = readtable(fpath);
+    Tk = Tk(Tk.t >= T_TRANS_S, :);   % sin la transicion quintica: metricas y graficas solo de seguimiento
     fprintf('[%s | rho=%s | test=%d]  Cargado: %d muestras\n', ...
             mode_label, rho, tnum, height(Tk));
 
