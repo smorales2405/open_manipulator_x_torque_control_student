@@ -74,8 +74,9 @@ using namespace std::chrono_literals;
 #define PACKAGE_URDF_DIR "."
 #endif
 
-static constexpr double PI   = M_PI;
-static constexpr int    NARM = 4;
+static constexpr double PI      = M_PI;
+static constexpr int    NARM    = 4;
+static constexpr double TAU_MAX = 1.2;    // [N·m] limite de torque por articulacion
 
 static constexpr char EFF_FRAME[] = "end_effector_link";
 
@@ -146,16 +147,14 @@ static CartRef circularTrajectory(double t)
 //    Debe coincidir con ref.y en t=0 (i.e., circularTrajectory(0)).
 //    El robot parte de su pose Gazebo y transiciona hacia Y_START en T_TRANS s.
 //
-//  Parametros configurables:
-//    TAU_MAX — saturacion de torque por articulacion [N·m]  
-//    LAMBDA  — factor de amortiguamiento DLS (rango tipico: 0.01 – 0.05)
+//  Parametro configurable:
+//    LAMBDA — factor de amortiguamiento DLS (rango tipico: 0.01 – 0.05)
 // ═══════════════════════════════════════════════════════════════════════════
 
 static const Eigen::Vector4d KP_Y = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR [x, y, z, phi]
 static const Eigen::Vector4d KD_Y = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR [x, y, z, phi]
 
-static constexpr double TAU_MAX   = 0.0;   // COMPLETAR limite de torque por articulacion [N·m]
-static constexpr double LAMBDA    = 0.01;  // factor de amortiguamiento DLS (rango tipico: 0.01-0.05)
+static constexpr double LAMBDA = 0.01;  // factor de amortiguamiento DLS (rango tipico: 0.01-0.05)
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Nodo de control ──────────────────────────────────────────────────────────

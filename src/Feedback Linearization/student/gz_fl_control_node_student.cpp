@@ -66,8 +66,9 @@ using namespace std::chrono_literals;
 #define PACKAGE_URDF_DIR "."
 #endif
 
-static constexpr double PI   = M_PI;
-static constexpr int    NARM = 4;    // articulaciones controladas (joint1..joint4)
+static constexpr double PI      = M_PI;
+static constexpr int    NARM    = 4;    // articulaciones controladas (joint1..joint4)
+static constexpr double TAU_MAX = 1.2;  // [N·m] limite de torque por articulacion
 
 // Suavizado del tanh en el feedforward de friccion de Coulomb [rad/s]
 // (usa la velocidad DESEADA, senal sin ruido: eps pequeno es seguro)
@@ -123,7 +124,7 @@ static Reference desiredTrajectory(double t)
 // ═══════════════════════════════════════════════════════════════════════════
 //  SECCION 2 — GANANCIAS DEL CONTROLADOR
 //
-//  COMPLETAR: Asignar los valores de Kp, Kd y el limite de torque.
+//  COMPLETAR: Asignar los valores de Kp y Kd.
 //
 //  Indice de cada elemento:  [joint1, joint2, joint3, joint4]
 //  Referencia de diseño:
@@ -133,7 +134,6 @@ static Reference desiredTrajectory(double t)
 
 static const Eigen::Vector4d KP = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR
 static const Eigen::Vector4d KD = {0.0, 0.0, 0.0, 0.0};   // COMPLETAR
-static constexpr double TAU_MAX = 0.0;                      // COMPLETAR  [N·m]
 
 // ═══════════════════════════════════════════════════════════════════════════
 
