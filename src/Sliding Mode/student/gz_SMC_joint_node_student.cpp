@@ -1,7 +1,7 @@
 // ============================================================================
 //  gz_SMC_joint_node_student.cpp
 //  Control por Modo Deslizante en espacio articular — OpenMANIPULATOR-X (Gazebo)
-//  [Archivo base para estudiantes — SMC, Actividad 1]
+//  [Archivo base para estudiantes — SMC, simulacion]
 //
 //  Modelo dinamico nominal (Guia SMC, Sec. 6.1):
 //    M(q)*ddq + Phi(q,dq) = tau - tau_fric
@@ -9,8 +9,9 @@
 //      Fv, Fc : <dynamics damping/friction> de joint1..4, leidos del modelo
 //               Pinocchio — los mismos valores que simula Gazebo con
 //               damping_scale = 1.0 y friction_scale = 1.0.
-//      El Coulomb usa la velocidad DESEADA dq_d (senal limpia): con dq medida
-//      el tanh conmutaria con el ruido cerca de velocidad cero.
+//      El Coulomb usa la velocidad DESEADA dq_d (senal limpia).
+//    La ley de control calcula tau = M*v + Phi; el nodo suma tau_fric despues
+//    de la ley, antes de saturar (infraestructura, como en los nodos FL).
 //
 //  Termino integral de la ley de alcance (parametro integral):
 //    dz/dt = K_I*s,   |z_i| <= Z_MAX_i,   z(0) = 0
@@ -27,7 +28,7 @@
 //  Transicion inicial: quintica generalizada de duracion T_TRANS desde la
 //  pose medida al arrancar (el brazo cae por gravedad entre el spawn de
 //  Gazebo y el inicio del nodo) hasta q_d(0), empalmando posicion, velocidad
-//  Y aceleracion con la trayectoria (empalme C2). El CSV registra la
+//  Y aceleracion con la trayectoria. El CSV registra la
 //  transicion y el seguimiento, sin retorno ni pausa; los scripts plots_SMC_*
 //  descartan t < T_TRANS para que las metricas sean solo de seguimiento.
 //
@@ -57,12 +58,6 @@
 //  CSV generado: data/smc/sim/act1/gz_smc_joint_<rho_func>_<test_num>.csv
 //  Columnas: t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des,
 //            s1..s4, tau1..tau4, z1..z4
-//  (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max. El
-//  nombre no distingue integral: usar un test_num distinto para cada ensayo.)
-//
-//  Nota: usar sim_init_config.yaml con use_fixed_init: true y escalas nominales
-//        mass_inertia/damping/friction = 1.0 (la friccion del feedforward debe
-//        coincidir con la de la planta: friction_scale 0.0 NO es valido aqui).
 //
 //  Ejemplos de uso:
 //
@@ -133,15 +128,6 @@ static constexpr double HOLD_TIME_S   = 0.5;   // [s]
 //    K_S      : 1  – 40    [rad/s²]  (ganancia de conmutacion)
 //    K_I      : 50 – 800   [1/s²]    (integral de s; solo con integral:=true)
 //
-//  Criterio:
-//   · K_S debe superar la perturbacion en aceleracion d = M^-1*dtau de la
-//     incertidumbre que se quiere dominar (±20 % de masa). joint3 y joint4
-//     reciben la mayor perturbacion: su inercia efectiva 1/(M^-1)_ii es diminuta.
-//   · Pendiente dentro de la capa: K_eff = K_V + K_S/PHI <= 75 [1/s]. Fuera de
-//     la capa solo queda K_V: conviene que no sea pequeno.
-//   · Sin integral, el error DC es ~ d/(Lambda*K_eff).
-//   · Dentro de la capa la ley equivale a un PID:
-//       kd = Lambda + K_eff    kp = Lambda*K_eff + K_I    ki = Lambda*K_I
 // ═══════════════════════════════════════════════════════════════════════════
 static const Eigen::Vector4d LAMBDA_Q = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 static const Eigen::Vector4d K_V      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
@@ -149,7 +135,7 @@ static const Eigen::Vector4d K_S      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 static const Eigen::Vector4d K_I      = {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Tope anti-windup del termino integral |z_i| <= Z_MAX_i [rad/s²] (no modificar)
+// Tope anti-windup del termino integral |z_i| <= Z_MAX_i [rad/s²]
 static const Eigen::Vector4d Z_MAX = {20.0, 100.0, 150.0, 600.0};
 
 // ── Estructura de referencia articular ───────────────────────────────────────
@@ -163,7 +149,7 @@ using omx::Reference;   // {q, dq, ddq}
 //    dqi_d(t)  = Bi * w * cos(w*t)
 //    ddqi_d(t) = -Bi * w^2 * sin(w*t)
 //
-//  Usar w = 1.0 rad/s (no modificar).
+//  Usar w = 1.0 rad/s.
 // ─────────────────────────────────────────────────────────────────────────────
 static Reference desiredTrajectory(double t)
 {
@@ -206,8 +192,7 @@ static Reference desiredTrajectory(double t)
 //
 //  Definir tambien PHI, la capa limite que el nodo pasa como phi a sat:
 //    PHI : 0.2 – 1.0 [rad/s], comun a las 4 articulaciones; solo se usa con
-//          rho_func:=sat. PHI pequena acerca sat a sign (mas chattering); PHI
-//          grande baja K_S/PHI y con ella la rigidez dentro de la capa.
+//          rho_func:=sat.
 // ─────────────────────────────────────────────────────────────────────────────
 static const double PHI = 0.0;   // COMPLETAR [rad/s]
 
@@ -221,7 +206,7 @@ static double rho_scalar(double s, RhoFunc func, double phi)
     case RhoFunc::SIGN:
       return 0.0;  // COMPLETAR: sign(s)
     case RhoFunc::SAT:
-      return 0.0;  // COMPLETAR: sat(s/phi) = clamp(s/phi, -1, 1)
+      return 0.0;  // COMPLETAR: sat(s/phi)
     default:
       return 0.0;
   }
@@ -419,17 +404,9 @@ private:
 
     const Eigen::Vector4d nle = model_.nonlinearEffects(q, dq);
 
-    // Feedforward de friccion del URDF (infraestructura, no modificar):
-    // viscosa con dq medida + Coulomb con la velocidad DESEADA ref.dq
-    Eigen::Vector4d tau_fric;
-    for (int i = 0; i < NARM; ++i) {
-      tau_fric[i] = fric_damping_[i] * dq[i]
-                  + fric_coulomb_[i] * std::tanh(ref.dq[i] / FRIC_EPS);
-    }
-
     // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 4] Ley SMC articular — COMPLETAR
-    //  Disponible: M (4x4), nle (4x1), tau_fric (4x1), ref.q, ref.dq, ref.ddq,
+    //  Disponible: M (4x4), nle (4x1), ref.q, ref.dq, ref.ddq,
     //              z_ (4x1, termino integral), rho_func_, PHI
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -448,18 +425,28 @@ private:
     // Termino integral z_ (infraestructura, no modificar):
     update_integral(s_q);
 
-    // 4.4 Aceleracion articular virtual (restar z_; con integral:=false vale 0):
+    // 4.4 Aceleracion articular virtual:
     // COMPLETAR
     const Eigen::Vector4d v_q = Eigen::Vector4d::Zero();
 
-    // 4.5 Torque:
-    const Eigen::Vector4d tau     = Eigen::Vector4d::Zero();
-    const Eigen::Vector4d tau_sat = tau.cwiseMin(TAU_MAX).cwiseMax(-TAU_MAX);
-    tau_saturated_prev_ = (tau.cwiseAbs().maxCoeff() >= TAU_MAX);   // anti-windup (no modificar)
+    // 4.5 Torque (sin friccion: el nodo la suma despues):
+    const Eigen::Vector4d tau = Eigen::Vector4d::Zero();
 
     // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
-    (void)M; (void)nle; (void)tau_fric; (void)e_dq; (void)rho; (void)v_q;
+    (void)M; (void)nle; (void)e_dq; (void)rho; (void)v_q;
     // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Compensacion de friccion del URDF (infraestructura, no modificar) ───
+    //  Gazebo simula <dynamics damping/friction>, pero Pinocchio no la incluye
+    //  en M ni en nle. Viscosa con dq medida y Coulomb con la velocidad
+    //  DESEADA ref.dq (senal limpia). El anti-windup mira el torque total.
+    Eigen::Vector4d tau_cmd = tau;
+    for (int i = 0; i < NARM; ++i) {
+      tau_cmd[i] += fric_damping_[i] * dq[i]
+                  + fric_coulomb_[i] * std::tanh(ref.dq[i] / FRIC_EPS);
+    }
+    const Eigen::Vector4d tau_sat = tau_cmd.cwiseMin(TAU_MAX).cwiseMax(-TAU_MAX);
+    tau_saturated_prev_ = (tau_cmd.cwiseAbs().maxCoeff() >= TAU_MAX);   // anti-windup
 
     // ── Publicar torques ───────────────────────────────────────────────────
     std_msgs::msg::Float64MultiArray cmd;

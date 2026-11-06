@@ -21,6 +21,8 @@
 //               damping_scale = 1.0 y friction_scale = 1.0.
 //      dq_d   : velocidad articular DESEADA = J_y^# * ydot_d (senal limpia;
 //               con dq medida el tanh conmutaria con el ruido cerca de cero).
+//    La ley de control calcula tau = M*qddot + Phi; el nodo suma tau_fric
+//    despues de la ley, antes de saturar (infraestructura, como en los nodos FL).
 //
 //  Transicion inicial: quintica generalizada de duracion T_TRANS que empalma
 //  posicion, velocidad Y aceleracion con la trayectoria de referencia en t=0
@@ -482,25 +484,10 @@ private:
       ref.yddot.setZero();
     }
 
-    // 6b. Feedforward de friccion del URDF (infraestructura, no modificar):
-    //     viscosa con dq medida + Coulomb con la velocidad articular DESEADA,
-    //     mapeada de ydot_d via la pseudo-inversa DLS
-    Eigen::Vector4d tau_fric;
-    {
-      const Eigen::Matrix4d A_fric =
-        J4 * J4.transpose() + LAMBDA_DLS_SQ * Eigen::Matrix4d::Identity();
-      const Eigen::Vector4d dq_des =
-        J4.transpose() * A_fric.ldlt().solve(ref.ydot);
-      for (int i = 0; i < NARM; ++i) {
-        tau_fric[i] = fric_damping_[i] * dq[i]
-                    + fric_coulomb_[i] * std::tanh(dq_des[i] / FRIC_EPS);
-      }
-    }
-
     // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 5] Ley SMC cartesiana — COMPLETAR (pasos 7-10 y 12)
     //  Disponible: y, ydot, ref.y, ref.ydot, ref.yddot, J4, jdqd, M4, nle4,
-    //              tau_fric, z_ (4x1, termino integral), rho_func_, PHI
+    //              z_ (4x1, termino integral), rho_func_, PHI
     // ─────────────────────────────────────────────────────────────────────────
 
     // 7. Errores cartesianos:
@@ -528,15 +515,31 @@ private:
       J4 * J4.transpose() + LAMBDA_DLS_SQ * Eigen::Matrix4d::Identity();
     const Eigen::Vector4d qddot = J4.transpose() * A_dls.ldlt().solve(v_y - jdqd);
 
-    // 12. Torque nominal y saturado:
+    // 12. Torque nominal (sin friccion: el nodo la suma despues):
     // COMPLETAR
-    const Eigen::Vector4d tau     = Eigen::Vector4d::Zero();
-    const Eigen::Vector4d tau_sat = tau.cwiseMin(TAU_MAX).cwiseMax(-TAU_MAX);
-    tau_saturated_prev_ = (tau.cwiseAbs().maxCoeff() >= TAU_MAX);   // anti-windup (no modificar)
+    const Eigen::Vector4d tau = Eigen::Vector4d::Zero();
 
     // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
-    (void)M4; (void)nle4; (void)tau_fric; (void)edot_y; (void)rho; (void)qddot;
+    (void)M4; (void)nle4; (void)edot_y; (void)rho; (void)qddot;
     // ─────────────────────────────────────────────────────────────────────────
+
+    // 12b. Compensacion de friccion del URDF (infraestructura, no modificar):
+    //      se suma despues de la ley, como en los nodos FL. Viscosa con dq
+    //      medida y Coulomb con la velocidad articular DESEADA, mapeada de
+    //      ydot_d via la pseudo-inversa DLS. El anti-windup mira el torque total.
+    Eigen::Vector4d tau_cmd = tau;
+    {
+      const Eigen::Matrix4d A_fric =
+        J4 * J4.transpose() + LAMBDA_DLS_SQ * Eigen::Matrix4d::Identity();
+      const Eigen::Vector4d dq_des =
+        J4.transpose() * A_fric.ldlt().solve(ref.ydot);
+      for (int i = 0; i < NARM; ++i) {
+        tau_cmd[i] += fric_damping_[i] * dq[i]
+                    + fric_coulomb_[i] * std::tanh(dq_des[i] / FRIC_EPS);
+      }
+    }
+    const Eigen::Vector4d tau_sat = tau_cmd.cwiseMin(TAU_MAX).cwiseMax(-TAU_MAX);
+    tau_saturated_prev_ = (tau_cmd.cwiseAbs().maxCoeff() >= TAU_MAX);   // anti-windup
 
     // 13. Condicionamiento del Jacobiano (no modificar)
     Eigen::JacobiSVD<Eigen::Matrix4d> svd(J4);

@@ -1,113 +1,95 @@
-/*
- * hw_SMC_joint_node_student.cpp
- * Control por Modo Deslizante en espacio articular — OpenMANIPULATOR-X
- * hardware real vía Dynamixel SDK directo, sin ros2_control.
- * [Archivo base para estudiantes — SMC, implementacion]
- *
- * ──────────────────────────────────────────────────────────────────────────
- * SECCIONES A COMPLETAR:
- *   [1] Trayectoria articular de referencia  →  desiredTrajectory()
- *   [2] Funcion de conmutacion sat(s/phi)    →  rho_scalar(), PHI
- *   [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S, K_I
- *   [4] Ley SMC articular                    →  compute_torque()
- * El resto (hardware Dynamixel, filtro alpha-beta, transicion quintica,
- * integracion de z con anti-windup, conversion torque→corriente, guardas de
- * seguridad, CSV) es INFRAESTRUCTURA: no modificar.
- * ──────────────────────────────────────────────────────────────────────────
- *
- * Superficie deslizante articular:
- *   e_q  = q  - q_d,   e_dq = dq - dq_d
- *   s_q  = e_dq + Lambda_q * e_q
- *
- * Ley de control SMC (ley de alcance exponencial + conmutacion + integral),
- * con la parte robusta escalada por diag(M):
- *   v_eq  = ddq_d - Lambda_q*e_dq                  (control equivalente)
- *   a_rob = K_V*s_q + K_S*sat(s_q/phi) + z         (alcance robusto)
- *   tau   = M(q)*v_eq + Phi(q,dq) - diag(M(q))*a_rob
- *   tau_sat = clamp(tau, -tau_max, tau_max)
- * En hardware la parte robusta va por diag(M) y no por la M completa: con la
- * M completa el torque robusto de un eje entra a los demas por M_ij. En el
- * robot, M34 ~ 3*M44 y la muneca usa ganancias altas, asi que el torque de J4
- * cancelaba el de J3 y ambas quedaban pegadas por stiction en las
- * inversiones. Con diag(M) cada eje recibe solo su propio torque robusto.
- *
- * Termino integral de la ley de alcance (parametro integral):
- *   dz/dt = K_I*s_q,   |z_i| <= Z_MAX_i,   z(0) = 0
- *   integral:=false -> z = 0 (SMC clasico)
- *   integral:=true  -> z integra en la transicion y el seguimiento, se congela
- *                      en el retorno y la pausa final, y mientras el torque o
- *                      la corriente saturan.
- *
- * NOTA sobre la friccion: a diferencia de los nodos gz (feedforward del URDF
- * a nivel de torque), en hardware la friccion REAL se compensa en el modelo
- * torque→corriente identificado (Fv, Fc en ticks, con Fc alimentado por la
- * velocidad DESEADA). NO agregar tau_fric del URDF aqui: seria doble
- * compensacion. El residual de friccion es la incertidumbre acotada que el
- * termino K_S*rho(s) debe dominar.
- *
- * Funcion de conmutacion (elemento a elemento):
- *   rho(s) = sat(s/phi)     phi: capa limite [rad/s]
- *
- * Trayectoria articular de referencia (omega = 1.0 rad/s, identica a gz):
- *   q_d = [ (pi/4)*sin(w*t'), -0.45+0.5*sin(w*t'), 0.35-0.5*sin(w*t'),
- *           pi/4+0.25*sin(w*t') ],   t' = t - T_TRANS
- * Transicion inicial: quintica generalizada [0, T_TRANS) desde la pose
- * medida hasta q_d(0) con empalme C2 (dq_d(0) = B*w != 0).
- *
- * Fases temporales completas (ver constantes T_TRANS/RETURN_TIME_S/HOLD_TIME_S):
- *   [0, T_TRANS)                                  transicion quintica a q_d(0)
- *   [T_TRANS, T_TRANS+t_run)                      seguimiento periodico
- *   [T_TRANS+t_run, T_TRANS+t_run+RETURN_TIME_S)  retorno articular a q_inicial
- *   [...+RETURN_TIME_S, ...+HOLD_TIME_S)          pausa en reposo (asienta)
- *   >= ...+RETURN_TIME_S+HOLD_TIME_S              corte de corriente y fin
- * El retorno evita que el brazo caiga por gravedad al recibir torque cero
- * de golpe en medio de la trayectoria (t_run<=0 desactiva el retorno: corre
- * indefinidamente). Es infraestructura (omx::JointReturn): no usa la ley de
- * control de la SECCION 4 ni gain_scale. El CSV registra la transicion inicial +
- * el seguimiento (en hardware las fallas suelen ocurrir en la transicion); plots_SMC_joint.m
- * en modo 'real' descarta t < T_TRANS para que las metricas sean solo de
- * seguimiento. El retorno y la pausa final NO se guardan en el CSV.
- *
- * Arranque: el control inicia solo con el robot en la posicion articular inicial
- * de config/control/hw_initial_pose.yaml (omx::waitForInitialPose); fuera de ese rango el
- * nodo muestra donde colocarlo y espera ENTER.
- *
- * Parametros ROS 2 (--ros-args -p nombre:=valor):
- *   port_name          [string]  "/dev/ttyUSB0"
- *   gain_scale         [double]  1.0    (escala K_V y K_S; K_I con su cuadrado; Lambda fija)
- *   t_run              [double]  20.0   (duracion del SEGUIMIENTO [s]; total =
- *                                        T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S)
- *   test_num           [int]     1      (CSV: hw_smc_joint_sat_<test_num>.csv)
- *   integral           [bool]    false  (activa el termino integral z)
- *   ab_alpha           [double]  0.28   (filtro α-β: ganancia de posicion)
- *   ab_beta            [double]  0.04   (filtro α-β: ganancia de velocidad)
- *   friction_fc_scale  [double]  0.95   (fraccion de Fc compensada; Fc usa dq DESEADA)
- *   loop_rate_hz       [double]  200.0  (frecuencia del lazo [Hz], acotada [50,400])
- *
- * Parametros del modelo identificado (auto-cargados desde
- * config/control/motorXM430W350T_params.yaml): motor_alpha, motor_Fv, motor_Fc,
- * motor_I_offset, motor_epsilon_friction, joint_zero_tick, encoder_sign,
- * current_sign, joint_lower/upper, current_*_limit, tau_max.
- *
- * CSV: data/smc/real/act1/hw_smc_joint_sat_<test_num>.csv
- * Columnas (compatibles con plots_SMC_joint.m, mode='real'):
- *   t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des, s1..s4,
- *   tau1..tau4, dq1_filt..dq4_filt, curr_cmd1..4, curr_meas1..4, z1..z4
- * (Sat% se calcula en MATLAB desde tau con el criterio >= 0.99*tau_max. El
- * nombre no distingue integral: usar un test_num distinto para cada ensayo.)
- *
- * Publisher: /hw/joint_states (sensor_msgs/JointState) — solo monitoreo
- *
- * Ejemplos de ejecucion (primer run SIEMPRE con gain_scale:=0.5):
- *   ros2 run open_manipulator_x_torque_control hw_smc_joint_node_student \
- *     --ros-args -p gain_scale:=0.5 -p test_num:=1 -p t_run:=30.0
- *
- *   ros2 run open_manipulator_x_torque_control hw_smc_joint_node_student \
- *     --ros-args -p integral:=true -p gain_scale:=0.5 -p test_num:=2 -p t_run:=30.0
- *
- * ADVERTENCIA: No ejecutar junto a hardware.launch.py ni ningun proceso
- * que acceda a /dev/ttyUSB0 (ros2_control_node, dynamixel_hardware_interface).
- */
+// ============================================================================
+//  hw_SMC_joint_node_student.cpp
+//  Control por Modo Deslizante en espacio articular — OpenMANIPULATOR-X (robot real)
+//  [Archivo base para estudiantes — SMC, implementacion]
+//
+//  Modelo dinamico nominal (Guia SMC, Sec. 6.1):
+//    M(q)*ddq + Phi(q,dq) = tau - tau_fric
+//    En hardware la friccion REAL se compensa en el modelo torque→corriente
+//    identificado (config/control/motorXM430W350T_params.yaml: Fv, Fc en ticks,
+//    con Fc alimentado por la velocidad DESEADA dq_d). NO agregar tau_fric del
+//    URDF en la ley: seria doble compensacion.
+//
+//  Parte robusta escalada por diag(M) (solo en hardware):
+//    tau = M(q)*v_eq + Phi(q,dq) - diag(M(q))*a_rob
+//      v_eq  : control equivalente (aceleracion de referencia)
+//      a_rob : alcance robusto, K_V*s + K_S*rho(s) + z
+//    Con la M completa el torque robusto de un eje entra a los demas por M_ij;
+//    en el robot eso dejaba pegadas a J3 y J4 en las inversiones.
+//
+//  Termino integral de la ley de alcance (parametro integral):
+//    dz/dt = K_I*s,   |z_i| <= Z_MAX_i,   z(0) = 0
+//    integral:=false -> z = 0 (SMC clasico)
+//    integral:=true  -> z integra en la transicion y el seguimiento, y se congela
+//                       en el retorno final y mientras el torque o la corriente
+//                       saturan.
+//    La actualizacion de z_ y el anti-windup ya estan implementados: en la ley
+//    solo se suma z_ al alcance robusto (ver SECCION de la ley de control).
+//
+//  Funcion de conmutacion (aplicada elemento a elemento):
+//    "sat"   ->  rho(s) = sat(s / phi)        phi: capa limite [rad/s]
+//
+//  Transicion inicial: quintica generalizada de duracion T_TRANS desde la
+//  pose medida al arrancar hasta q_d(0), empalmando posicion, velocidad
+//  y aceleracion con la trayectoria. El CSV registra la transicion y el
+//  seguimiento, sin retorno ni pausa; los scripts plots_SMC_* descartan
+//  t < T_TRANS para que las metricas sean solo de seguimiento.
+//
+//  Fases (con t_run = 0 no hay limite ni retorno):
+//    [0, T_TRANS)                     transicion quintica hasta q_d(0)
+//    [T_TRANS, T_TRANS+t_run)         seguimiento de la trayectoria
+//    [T_TRANS+t_run, +RETURN_TIME_S)  retorno articular al reposo en la pose inicial
+//    [..., +HOLD_TIME_S)              pausa en reposo; luego corte de corriente y fin
+//  El retorno evita que el brazo caiga por gravedad al recibir torque cero en
+//  medio de la trayectoria; usa su propio control, no la ley de la SECCION 4.
+//
+//  Arranque: el control inicia solo con el robot en la posicion articular
+//  inicial de config/control/hw_initial_pose.yaml; fuera de ese rango el nodo
+//  muestra donde colocarlo y espera ENTER.
+//
+//  Lazo de control: 200 Hz de tiempo real (loop_rate_hz). La ley usa la
+//  velocidad estimada por el filtro alfa-beta.
+//
+//  Dynamixel SDK directo sobre /dev/ttyUSB0, sin ros2_control.
+//  Publicador : /hw/joint_states  (sensor_msgs/JointState, solo monitoreo)
+//
+//  Parametros ROS 2 (--ros-args -p nombre:=valor):
+//    port_name          [string]  "/dev/ttyUSB0"
+//    gain_scale         [double]  1.0    — escala K_V y K_S; K_I con su cuadrado
+//    t_run              [double]  20.0   — duracion del seguimiento en segundos;
+//                                          total = T_TRANS + t_run +
+//                                          RETURN_TIME_S + HOLD_TIME_S
+//    test_num           [int]     1      — identificador del CSV generado
+//    integral           [bool]    false  — activa el termino integral z
+//    ab_alpha           [double]  0.28   — filtro alfa-beta: ganancia de posicion
+//    ab_beta            [double]  0.04   — filtro alfa-beta: ganancia de velocidad
+//    friction_fc_scale  [double]  0.95   — fraccion de Fc compensada
+//    loop_rate_hz       [double]  200.0  — frecuencia del lazo [Hz], en [50, 400]
+//  El modelo del motor, la calibracion y los limites se cargan solos desde
+//  config/control/motorXM430W350T_params.yaml.
+//
+//  CSV generado: data/smc/real/act1/hw_smc_joint_sat_<test_num>.csv
+//  Columnas: t, q1..q4, dq1..dq4, q1_des..q4_des, dq1_des..dq4_des,
+//            s1..s4, tau1..tau4, dq1_filt..dq4_filt, curr_cmd1..4,
+//            curr_meas1..4, z1..z4
+//  El nombre no distingue integral: usar un test_num distinto en cada ensayo.
+//
+//  Ejemplos de uso (primer run SIEMPRE con gain_scale:=0.5):
+//
+//    ros2 run open_manipulator_x_torque_control hw_smc_joint_node_student --ros-args -p gain_scale:=0.5 -p test_num:=1 -p t_run:=25.0
+//
+//    ros2 run open_manipulator_x_torque_control hw_smc_joint_node_student --ros-args -p integral:=true -p gain_scale:=0.5 -p test_num:=2 -p t_run:=25.0
+//
+//  ADVERTENCIA: no ejecutar junto a hardware.launch.py ni a otro proceso que
+//  use /dev/ttyUSB0 (ros2_control_node, dynamixel_hardware_interface).
+//
+//  ──────────────────────────────────────────────────────────────────────────
+//  SECCIONES A COMPLETAR:
+//    [1] Trayectoria articular de referencia  →  desiredTrajectory()
+//    [2] Funcion de conmutacion               →  rho_scalar(), PHI
+//    [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S, K_I
+//    [4] Ley SMC articular                    →  compute_torque()
+// ============================================================================
 
 #include <array>
 #include <chrono>
@@ -142,20 +124,18 @@
 
 using namespace std::chrono_literals;
 
-// ============================================================
-// Constantes (servos Dynamixel y unidades: omx/dynamixel_io.hpp)
-// ============================================================
-
 static constexpr double PI = 3.14159265358979323846;
 static constexpr int    NUM_JOINTS = 4;
-
 // Calibracion, limites y modelo del motor: omx::declareHwConfig
 // (config/control/motorXM430W350T_params.yaml como parametros ROS 2).
 
 // Duracion de la transicion quintica desde la pose medida hasta q_d(0)
+// (no modificar)
 static constexpr double T_TRANS = 3.0;   // [s]
-static constexpr double RETURN_TIME_S = 3.0;   // duracion del retorno articular a q_inicial
-static constexpr double HOLD_TIME_S   = 0.5;   // pausa en reposo antes de cortar corriente
+// Duraciones del retorno final a la pose inicial y de la pausa en reposo antes
+// de cortar la corriente (no modificar)
+static constexpr double RETURN_TIME_S = 3.0;   // [s]
+static constexpr double HOLD_TIME_S   = 0.5;   // [s]
 
 using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 
@@ -163,26 +143,12 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //  [SECCION 3] GANANCIAS SMC — COMPLETAR
 //  Ajustar los valores para cada articulacion [joint1, joint2, joint3, joint4]
 //
-//  En HARDWARE la stiction real exige rigidez varias veces mayor que en
-//  Gazebo (en joint4, M44 ~ 0.001 kg·m² convierte aceleraciones en
-//  mili-torques: las ganancias de sim dejan la muneca pegada). Con diag(M),
-//  dentro de la capa cada articulacion equivale a un PD propio con torque
-//  M_ii*(kp_eq*e + kd_eq*e_dot):
-//    kp_eq = Lambda*(K_V + K_S/PHI)   kd_eq = Lambda + K_V + K_S/PHI
-//  Apuntar a kp_eq del orden de cientos en J1–J3 y de miles en J4.
+//  Rangos recomendados (lazo de 200 Hz, Ts = 5 ms; con PHI = 0.3):
+//    LAMBDA_Q : 15 – 45   [1/s]     (ancho de banda de la superficie)
+//    K_V      : 10 – 60             (alcance exponencial; proporcional a s)
+//    K_S      : 1  – 8    [rad/s²]  (ganancia de conmutacion)
+//    K_I      : 5  – 80   [1/s²]    (integral de s; solo con integral:=true)
 //
-//  Con integral:=true se suman kp_eq += K_I y ki_eq = Lambda*K_I.
-//
-//  Rangos recomendados (los de K_V y K_S suponen PHI = 0.3):
-//    LAMBDA_Q : 15 – 45   [1/s]
-//    K_V      : 10 – 60
-//    K_S      : 1  – 8    [rad/s²]
-//    K_I      : 5  – 80   [1/s²]     (integral de s; solo con integral:=true)
-//  El integral tarda ~(K_V + K_S/PHI)/K_I segundos en corregir; para seguir la
-//  friccion entre inversiones de la trayectoria (cada ~3 s) conviene ~1 s. Un
-//  K_I demasiado alto hace "cazar" al brazo en las inversiones (la inercia del
-//  rotor no esta en M(q) y reduce la ganancia real de lazo).
-//  Primer run SIEMPRE con gain_scale:=0.5.
 // ═══════════════════════════════════════════════════════════════════════════
 static const Vec4 LAMBDA_Q = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
 static const Vec4 K_V      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
@@ -190,14 +156,11 @@ static const Vec4 K_S      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMP
 static const Vec4 K_I      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Tope anti-windup del termino integral |z_i| <= Z_MAX_i [rad/s²] (no modificar)
+// Tope anti-windup del termino integral |z_i| <= Z_MAX_i [rad/s²]
 static const Vec4 Z_MAX = (Vec4() << 30.0, 80.0, 120.0, 400.0).finished();
 
-// ============================================================
-// Trayectoria articular de referencia (identica a gz_SMC_joint_node)
-// ============================================================
-
-using omx::Reference;
+// ── Estructura de referencia articular ───────────────────────────────────────
+using omx::Reference;   // {q, dq, ddq}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  [SECCION 1] Trayectoria articular de referencia — COMPLETAR
@@ -207,7 +170,7 @@ using omx::Reference;
 //    dqi_d(t)  = Bi * w * cos(w*t)
 //    ddqi_d(t) = -Bi * w^2 * sin(w*t)
 //
-//  Usar w = 1.0 rad/s (no modificar). Misma trayectoria que en Gazebo.
+//  Usar w = 1.0 rad/s.
 // ─────────────────────────────────────────────────────────────────────────────
 static Reference desiredTrajectory(double t)
 {
@@ -248,10 +211,7 @@ static Reference desiredTrajectory(double t)
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
 //
 //  Definir tambien PHI, la capa limite que el nodo pasa como phi a sat:
-//    PHI : 0.2 – 0.5 [rad/s], comun a las 4 articulaciones (los rangos de K_V
-//          y K_S de la SECCION 3 suponen PHI = 0.3). PHI pequena acerca sat a
-//          sign (mas chattering); PHI grande baja K_S/PHI y con ella la
-//          rigidez dentro de la capa.
+//    PHI : 0.2 – 0.5 [rad/s], comun a las 4 articulaciones.
 // ─────────────────────────────────────────────────────────────────────────────
 static const double PHI = 0.0;   // COMPLETAR [rad/s]
 
@@ -272,9 +232,7 @@ static double rho_scalar(double s, double phi)
   return r;
 }
 
-// ============================================================
-// Nodo ROS 2
-// ============================================================
+// ── Nodo principal ────────────────────────────────────────────────────────────
 
 class HWSMCJointNode : public rclcpp::Node
 {
@@ -402,17 +360,10 @@ public:
   }
 
 private:
-  // ─────────────────────────────────────────────────────────────────────────
-  //  Ley de control SMC articular
-  //  gain_scale escala K_V y K_S linealmente y K_I con su cuadrado: el margen
-  //  del integral depende de kd*kp, asi que bajar la ganancia no lo reduce.
-  //  Lambda define la superficie y no se escala. integrate habilita la
-  //  actualizacion del termino integral.
-  // ─────────────────────────────────────────────────────────────────────────
-
   // Termino integral de la ley de alcance (infraestructura, no modificar):
   // dz/dt = K_I*s, con tope |z_i| <= Z_MAX_i. Vale cero con integral:=false y
-  // se congela si el tick anterior saturo torque o corriente.
+  // se congela si el tick anterior saturo torque o corriente. gain_scale escala
+// K_I con su cuadrado.
   void update_integral(const Vec4& s, bool integrate)
   {
     if (integrate && !tau_saturated_prev_) {
@@ -421,66 +372,58 @@ private:
     }
   }
 
+  // ── Ley de control (se llama en cada tick con dq filtrada) ─────────────────
   Vec4 compute_torque(const Vec4& q, const Vec4& dq, const Reference& ref,
                       bool integrate, Vec4& s_out)
   {
+    // gain_scale escala K_V y K_S (Lambda define la superficie y no se escala)
     const Vec4 k_v = K_V * gain_scale_;
     const Vec4 k_s = K_S * gain_scale_;
 
-    // Dinamica nominal M(q) y Phi(q,dq) (infraestructura, no modificar)
+    // ── Dinamica nominal via Pinocchio ─────────────────────────────────────
     const Eigen::Matrix4d M4   = model_.massMatrix(q);
     const Vec4            nle4 = model_.nonlinearEffects(q, dq);
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 4] Ley SMC articular — COMPLETAR
-    //
-    //  Disponible:
-    //    q, dq                  — posicion y velocidad articular (dq filtrada)
-    //    ref.q, ref.dq, ref.ddq — referencia y sus derivadas analiticas
-    //    M4 (4x4), nle4 (4x1)   — dinamica nominal M(q) y Phi(q,dq)
-    //    LAMBDA_Q, k_v, k_s     — ganancias (k_v, k_s ya escaladas)
-    //    z_ (4x1)               — termino integral (cero con integral:=false)
-    //    rho_vec(s, PHI)        — funcion de conmutacion vectorial
-    //
-    //  Ley (guia SMC; en hardware SIN tau_fric del URDF — la friccion
-    //  real se compensa en torque_to_current con el modelo del motor):
-    //    e_q   = q - q_d          e_dq = dq - dq_d
-    //    s_q   = e_dq + Lambda_q .* e_q          (asignar a s_out)
-    //    v_eq  = ddq_d - Lambda_q.*e_dq          (control equivalente)
-    //    a_rob = k_v.*s_q + k_s.*rho(s_q) + z_   (alcance robusto)
-    //    tau   = M4 * v_eq + nle4 - diag(M4) .* a_rob
-    //  diag(M4) = M4.diagonal() (vector 4x1); el producto elemento a elemento
-    //  es cwiseProduct.
-    // ═══════════════════════════════════════════════════════════════════════
+    //  Disponible: M4 (4x4), nle4 (4x1), q, dq (filtrada), ref.q, ref.dq,
+    //              ref.ddq, LAMBDA_Q, k_v, k_s (ya escaladas),
+    //              z_ (4x1, termino integral), PHI
+    //  diag(M4) = M4.diagonal(); producto elemento a elemento: cwiseProduct
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // 4.1 Errores articulares:
-    const Vec4 e_q  = Vec4::Zero();   // COMPLETAR
-    const Vec4 e_dq = Vec4::Zero();   // COMPLETAR
+    //  4.1 Errores articulares:
+    const Vec4 e_q  = Vec4::Zero();
+    const Vec4 e_dq = Vec4::Zero();
 
     // 4.2 Superficie deslizante:
-    const Vec4 s_q = Vec4::Zero();    // COMPLETAR
+    // COMPLETAR
+    const Vec4 s_q = Vec4::Zero();
 
-    // 4.3 Funcion de conmutacion: rho = rho_vec(s_q, PHI)
-    const Vec4 rho = Vec4::Zero();    // COMPLETAR
+    // 4.3 Funcion de conmutacion: rho = rho_vec(s_q, ...)
+    // COMPLETAR
+    const Vec4 rho = Vec4::Zero();
 
     // Termino integral z_ (infraestructura, no modificar):
     update_integral(s_q, integrate);
 
-    // 4.4 Control equivalente (aceleracion de referencia):
-    const Vec4 v_eq = Vec4::Zero();   // COMPLETAR
+    // 4.4 Control equivalente:
+    // COMPLETAR
+    const Vec4 v_eq = Vec4::Zero();
 
-    // 4.5 Alcance robusto (aceleracion):
-    const Vec4 a_rob = Vec4::Zero();  // COMPLETAR
+    // 4.5 Alcance robusto (sumar z_; con integral:=false vale 0):
+    // COMPLETAR
+    const Vec4 a_rob = Vec4::Zero();
 
     // 4.6 Torque:
-    const Vec4 tau = Vec4::Zero();    // COMPLETAR
+    const Vec4 tau = Vec4::Zero();
 
     s_out = s_q;
 
     // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
     (void)M4; (void)nle4; (void)e_q; (void)e_dq; (void)rho; (void)v_eq; (void)a_rob;
     (void)k_v; (void)k_s; (void)ref;
-    // ═══════════════════════════════════════════════════════════════════════
+    // ─────────────────────────────────────────────────────────────────────────
 
     return tau;
   }
@@ -712,10 +655,6 @@ private:
   std::ofstream csv_;
   std::string   csv_path_;
 };
-
-// ============================================================
-// main
-// ============================================================
 
 int main(int argc, char* argv[])
 {
