@@ -20,7 +20,8 @@
 //    - Suscriptor /joint_states  →  q, dq
 //    - Publicador /arm_effort_controller/commands  →  tau
 //    - Rampa quintica de 3 s desde la pose inicial medida hasta el inicio de
-//      la trayectoria 
+//      la trayectoria, q_des(0); luego el nodo evalua desiredTrajectory(t)
+//      con t medido desde el fin de la rampa
 //    - Retorno articular suave (5to orden, omx::JointReturn) a q_inicial al
 //      terminar el seguimiento + pausa en reposo antes de soltar el torque: el
 //      robot queda en la pose de partida y el nodo se puede volver a ejecutar
@@ -88,7 +89,8 @@ using omx::Reference;   // {q, dq, ddq}
 //  COMPLETAR: Definir q_des(t), dq_des(t) y ddq_des(t) para cada articulacion.
 //
 //  Parametro de entrada:
-//    t  — tiempo actual de simulacion [s]
+//    t  — tiempo transcurrido desde el inicio de la trayectoria [s]
+//         (el nodo resta la duracion de la rampa, RAMP_TIME_S)
 //
 //  Salida esperada:
 //    ref.q   << q1_des(t),   q2_des(t),   q3_des(t),   q4_des(t);
@@ -248,9 +250,9 @@ private:
       }
       ref = ret_.reference(t_ - (RAMP_TIME_S + t_run_));
     } else if (t_ < RAMP_TIME_S) {
-      ref = omx::quinticTransition(t_, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
+      ref = omx::quinticTransition(t_, RAMP_TIME_S, q_initial_, desiredTrajectory(0.0));
     } else {
-      ref = desiredTrajectory(t_);
+      ref = desiredTrajectory(t_ - RAMP_TIME_S);   // la trayectoria empieza al terminar la rampa
     }
 
     // ── 2. Matriz de masa  M(q)  [NARM x NARM] ────────────────────────────

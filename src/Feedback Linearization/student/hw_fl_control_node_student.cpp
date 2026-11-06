@@ -22,7 +22,9 @@
  *     (motorXM430W350T_params.yaml); el termino de Coulomb usa la velocidad
  *     DESEADA 
  *   - Saturacion del torque a +/-tau_max antes de enviar corriente
- *   - Transicion quintica de 3 s desde la posicion inicial hasta el inicio de la trayectoria
+ *   - Transicion quintica de 3 s desde la posicion inicial hasta el inicio de la
+ *     trayectoria, q_des(0); luego el nodo evalua desiredTrajectory(t) con t
+ *     medido desde el fin de la transicion
  *   - Retorno articular al reposo en q_inicial (omx::JointReturn) al terminar
  *     el seguimiento + pausa en reposo antes de cortar corriente
  *   - Verificacion de limites articulares y de corriente medida (parada de emergencia)
@@ -118,6 +120,7 @@ using omx::Reference;   // {q, dq, ddq}
 //
 //  Parametros de entrada:
 //    t   — tiempo transcurrido desde el inicio de la trayectoria [s]
+//          (el nodo resta la duracion de la transicion, RAMP_TIME_S)
 //
 //  Salida esperada:
 //    ref.q   << q1_des(t), q2_des(t), q3_des(t), q4_des(t);
@@ -382,9 +385,9 @@ private:
       }
       ref = ret_.reference(t - (RAMP_TIME_S + t_run_));
     } else if (t < RAMP_TIME_S) {
-      ref = omx::quinticTransition(t, RAMP_TIME_S, q_initial_, desiredTrajectory(RAMP_TIME_S));
+      ref = omx::quinticTransition(t, RAMP_TIME_S, q_initial_, desiredTrajectory(0.0));
     } else {
-      ref = desiredTrajectory(t);
+      ref = desiredTrajectory(t - RAMP_TIME_S);   // la trayectoria empieza al terminar la transicion
     }
 
     // 5. Verificar limites: referencia y estado medido
