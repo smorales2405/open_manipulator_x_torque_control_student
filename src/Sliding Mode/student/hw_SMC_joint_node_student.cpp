@@ -219,7 +219,7 @@ static double rho_scalar(double s, double phi)
 {
   (void)s; (void)phi;
 
-  return 0.0;  // COMPLETAR: sat(s/phi) = clamp(s/phi, -1, 1)
+  return 0.0;  // COMPLETAR: sat(s/phi)
 }
 
 // Aplica rho_scalar elemento a elemento sobre el vector s (no modificar)
@@ -411,7 +411,7 @@ private:
     // COMPLETAR
     const Vec4 v_eq = Vec4::Zero();
 
-    // 4.5 Alcance robusto (sumar z_; con integral:=false vale 0):
+    // 4.5 Alcance robusto:
     // COMPLETAR
     const Vec4 a_rob = Vec4::Zero();
 

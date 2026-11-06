@@ -53,15 +53,8 @@ obstacle_pose: [0.1125, 0.0, 0.0, 0.0, 0.0, 1.5708]
 # Rango tipico de uso:
 #   Sin friccion/damping : damping_scale: 0.0  friction_scale: 0.0
 #   Modelo nominal       : mass_inertia_scale: 1.0  damping_scale: 1.0  friction_scale: 1.0
-#   Perturbacion de masa : mass_inertia_scale: 1.5
-
-# MRAC 12p — C1 gemelo digital: 1.0/1.0/1.0 (friccion Coulomb ENCENDIDA).
-#   C2: friction/damping en {0.5, 1.5} | C3: ej. 1.1/1.3/0.7
-# Act2 MRAC 8p usa: mass 1.2, damping 1.1, friction 0.0 (restaurar para ese lab).
-# SMC (los nodos compensan la friccion del URDF con feedforward):
-#   Parte A nominal        : 1.0 / 1.0 / 1.0
-#   Parte B inc. parametrica: 1.2 / 1.1 / 1.0
-#   Parte C carga adicional : 1.0 / 1.0 / 1.0 + spawn_load: true
+#   Perturbacion de masa : mass_inertia_scale: 1.15
+#
 mass_inertia_scale: 1.0
 damping_scale: 1.0
 friction_scale: 1.0
