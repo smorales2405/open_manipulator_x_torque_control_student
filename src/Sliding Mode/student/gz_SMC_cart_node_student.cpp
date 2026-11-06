@@ -59,7 +59,6 @@
 //                                   T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S.
 //                                   Al terminar, el nodo se cierra solo.
 //    rho_func  [string]  "sat"    — funcion de conmutacion: "sat" | "sign"
-//    phi       [double]  0.2      — capa limite [m/s o rad/s]
 //    integral  [bool]    false    — activa el termino integral z
 //
 //  CSV: data/smc/sim/act2/gz_smc_cart_<rho_func>_<test_num>.csv
@@ -87,7 +86,7 @@
 //  SECCIONES A COMPLETAR:
 //    [1] Trayectoria cartesiana de referencia  →  desiredTrajectory()
 //    [2] Vector Y_START                        →  constante Y_START
-//    [3] Funciones de conmutacion              →  rho_scalar()
+//    [3] Funciones de conmutacion              →  rho_scalar(), PHI
 //    [4] Ganancias SMC                         →  LAMBDA_Y, K_V, K_S, K_I
 //    [5] Ley SMC cartesiana (pasos 7-10 y 12)  →  tick()
 // ============================================================================
@@ -166,9 +165,9 @@ static const Eigen::Vector4d Y_START {0.0, 0.0, 0.0, 0.0};  // COMPLETAR
 //   · K_S debe superar la perturbacion en aceleracion d_y = J_y*M^-1*dtau de la
 //     incertidumbre que se quiere dominar (±20 % de masa). El canal phi recibe
 //     la mayor perturbacion por la inercia efectiva diminuta de joint4.
-//   · phi es unico: sus unidades mezclan m/s y rad/s. La pendiente de cada
-//     canal se reparte entre K_V y K_S/phi.
-//   · Pendiente dentro de la capa: K_eff = K_V + K_S/phi <= 75 [1/s]. Fuera de
+//   · PHI es unica: sus unidades mezclan m/s y rad/s. La pendiente de cada
+//     canal se reparte entre K_V y K_S/PHI.
+//   · Pendiente dentro de la capa: K_eff = K_V + K_S/PHI <= 75 [1/s]. Fuera de
 //     la capa solo queda K_V: conviene que no sea pequeno.
 //   · Sin integral, el error DC es ~ d_y/(Lambda*K_eff).
 //   · Dentro de la capa la ley equivale a un PID:
@@ -242,7 +241,15 @@ static CartRef desiredTrajectory(double t)
 //  Implementar rho(s) para cada tipo:
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
 //    sign : rho(s) = +1 si s > 0,  -1 si s < 0,  0 si s == 0
+//
+//  Definir tambien PHI, la capa limite que el nodo pasa como phi a sat:
+//    PHI : 0.1 – 0.5 [m/s | rad/s], unica para los 4 canales (sus unidades
+//          mezclan m/s y rad/s); solo se usa con rho_func:=sat. PHI pequena
+//          acerca sat a sign (mas chattering); PHI grande baja K_S/PHI y con
+//          ella la rigidez dentro de la capa.
 // ─────────────────────────────────────────────────────────────────────────────
+static const double PHI = 0.0;   // COMPLETAR [m/s | rad/s]
+
 enum class RhoFunc { SIGN, SAT };
 
 static double rho_scalar(double s, RhoFunc func, double phi)
@@ -284,12 +291,10 @@ public:
     this->declare_parameter<int>        ("test_num", 1);
     this->declare_parameter<double>     ("t_run",    0.0);
     this->declare_parameter<std::string>("rho_func", "sat");
-    this->declare_parameter<double>     ("phi",      0.2);
     this->declare_parameter<bool>       ("integral", false);
 
     const int         test_num = this->get_parameter("test_num").as_int();
     t_run_                     = this->get_parameter("t_run").as_double();
-    phi_                       = this->get_parameter("phi").as_double();
     integral_                  = this->get_parameter("integral").as_bool();
     const std::string rho_str  = this->get_parameter("rho_func").as_string();
 
@@ -320,9 +325,16 @@ public:
     fric_damping_ = model_.urdfDamping();
     fric_coulomb_ = model_.urdfFriction();
 
+    // PHI se completa en la SECCION 3: sat(s/PHI) necesita PHI > 0
+    if (rho_func_ == RhoFunc::SAT && !(PHI > 0.0)) {
+      RCLCPP_FATAL(this->get_logger(),
+        "PHI = %.3f: completar PHI > 0 en la SECCION 3 (capa limite de sat)", PHI);
+      throw std::runtime_error("PHI sin completar");
+    }
+
     RCLCPP_INFO(this->get_logger(),
-      "SMC cartesiano — rho=%s  phi=%.4f  integral=%s  tau_max=%.2f N·m",
-      rho_str_.c_str(), phi_, integral_ ? "true" : "false", TAU_MAX);
+      "SMC cartesiano — rho=%s  PHI=%.4f  integral=%s  tau_max=%.2f N·m",
+      rho_str_.c_str(), PHI, integral_ ? "true" : "false", TAU_MAX);
     RCLCPP_INFO(this->get_logger(),
       "Lambda_y=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]",
       LAMBDA_Y[0], LAMBDA_Y[1], LAMBDA_Y[2], LAMBDA_Y[3],
@@ -488,7 +500,7 @@ private:
     // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 5] Ley SMC cartesiana — COMPLETAR (pasos 7-10 y 12)
     //  Disponible: y, ydot, ref.y, ref.ydot, ref.yddot, J4, jdqd, M4, nle4,
-    //              tau_fric, z_ (4x1, termino integral)
+    //              tau_fric, z_ (4x1, termino integral), rho_func_, PHI
     // ─────────────────────────────────────────────────────────────────────────
 
     // 7. Errores cartesianos:
@@ -593,7 +605,6 @@ private:
   double      t_run_;
   RhoFunc     rho_func_;
   std::string rho_str_;
-  double      phi_;
 
   Eigen::Vector4d y0_;
   bool            y0_initialized_;

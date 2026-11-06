@@ -8,7 +8,7 @@
  * SECCIONES A COMPLETAR:
  *   [1] Trayectoria cartesiana de referencia  →  desiredTrajectory()
  *   [2] Vector Y_START                        →  constante Y_START
- *   [3] Funcion de conmutacion sat(s/phi)     →  rho_scalar()
+ *   [3] Funcion de conmutacion sat(s/phi)     →  rho_scalar(), PHI
  *   [4] Ganancias SMC                         →  LAMBDA_Y, K_V, K_S, K_I
  *   [5] Ley SMC cartesiana                    →  compute_control()
  *   [6] Torque                                →  compute_control()
@@ -95,7 +95,6 @@
  *   t_run              [double]  20.0   (duracion del SEGUIMIENTO [s]; total =
  *                                        T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S)
  *   test_num           [int]     1      (CSV: hw_smc_cart_sat_<test_num>.csv)
- *   phi                [double]  0.3    (capa limite para sat(s/phi) [m/s o rad/s])
  *   integral           [bool]    false  (activa el termino integral z)
  *   ab_alpha           [double]  0.2    (filtro α-β: ganancia de posicion)
  *   ab_beta            [double]  0.02   (filtro α-β: ganancia de velocidad)
@@ -221,11 +220,11 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //
 //  En HARDWARE la stiction real exige rigidez de tarea varias veces mayor
 //  que en Gazebo. Dentro de la capa el SMC equivale a un PD con:
-//    kp_eq = Lambda*(K_V + K_S/phi)   kd_eq = Lambda + K_V + K_S/phi
+//    kp_eq = Lambda*(K_V + K_S/PHI)   kd_eq = Lambda + K_V + K_S/PHI
 //  Apuntar a la rigidez validada por FL: kp_eq ~ [400, 200, 800, 1500].
 //  Con integral:=true se suman kp_eq += K_I y ki_eq = Lambda*K_I.
 //
-//  Rangos recomendados (con phi = 0.3):
+//  Rangos recomendados (los de K_V y K_S suponen PHI = 0.3):
 //    LAMBDA_Y : 10 – 40   [1/s]
 //    K_V      : 8  – 30
 //    K_S      : 1  – 5    [m/s² | rad/s²]
@@ -302,7 +301,15 @@ static CartRef desiredTrajectory(double t)
 //
 //  Implementar la saturacion (funcion unica en este nodo):
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
+//
+//  Definir tambien PHI, la capa limite que el nodo pasa como phi a sat:
+//    PHI : 0.2 – 0.5 [m/s | rad/s], unica para los 4 canales (los rangos de
+//          K_V y K_S de la SECCION 4 suponen PHI = 0.3). PHI pequena acerca
+//          sat a sign (mas chattering); PHI grande baja K_S/PHI y con ella la
+//          rigidez dentro de la capa.
 // ─────────────────────────────────────────────────────────────────────────────
+static const double PHI = 0.0;   // COMPLETAR [m/s | rad/s]
+
 static double rho_scalar(double s, double phi)
 {
   (void)s; (void)phi;
@@ -335,7 +342,6 @@ public:
     this->declare_parameter<double>     ("gain_scale",  1.0);
     this->declare_parameter<double>     ("t_run",       20.0);
     this->declare_parameter<int>        ("test_num",    1);
-    this->declare_parameter<double>     ("phi",         0.3);
     this->declare_parameter<bool>       ("integral",    false);
 
     this->declare_parameter<double>("ab_alpha", 0.2);
@@ -349,7 +355,6 @@ public:
     gain_scale_ = this->get_parameter("gain_scale").as_double();
     t_run_      = this->get_parameter("t_run").as_double();
     const int test_num = this->get_parameter("test_num").as_int();
-    phi_        = this->get_parameter("phi").as_double();
     integral_   = this->get_parameter("integral").as_bool();
 
     ab_alpha_ = get_parameter("ab_alpha").as_double();
@@ -357,11 +362,19 @@ public:
     loop_rate_hz_ = std::min(std::max(get_parameter("loop_rate_hz").as_double(), 50.0), 400.0);
     Ts_ = 1.0 / loop_rate_hz_;
 
+    // PHI se completa en la SECCION 3: sat(s/PHI) necesita PHI > 0. Se
+    // verifica antes de abrir el puerto y habilitar torque.
+    if (!(PHI > 0.0)) {
+      RCLCPP_FATAL(get_logger(),
+        "PHI = %.3f: completar PHI > 0 en la SECCION 3 (capa limite de sat)", PHI);
+      throw std::runtime_error("PHI sin completar");
+    }
+
     RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  t_run(seguimiento)=%.1fs  test=%d",
       port_name_.c_str(), gain_scale_, t_run_, test_num);
     RCLCPP_INFO(get_logger(),
-      "SMC cartesiano hw — rho=sat  phi=%.3f  integral=%s  tau_max=%.2f N·m  T_trans=%.1f s",
-      phi_, integral_ ? "true" : "false", hw_.limits.tau_max, T_TRANS);
+      "SMC cartesiano hw — rho=sat  PHI=%.3f  integral=%s  tau_max=%.2f N·m  T_trans=%.1f s",
+      PHI, integral_ ? "true" : "false", hw_.limits.tau_max, T_TRANS);
     RCLCPP_INFO(get_logger(),
       "Lambda_y=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]  lambda_DLS=%.3f",
       LAMBDA_Y[0], LAMBDA_Y[1], LAMBDA_Y[2], LAMBDA_Y[3],
@@ -514,11 +527,11 @@ private:
     //  [SECCION 5] Ley SMC cartesiana — COMPLETAR
     //
     //  Disponible: e_y, edot_y, ref.yddot, LAMBDA_Y, k_v, k_s (ya escaladas),
-    //              z_ (termino integral, cero con integral:=false), phi_,
-    //              rho_vec(s, phi_)
+    //              z_ (termino integral, cero con integral:=false), PHI,
+    //              rho_vec(s, PHI)
     //
     //  5.1  s_y = edot_y + Lambda_y * e_y
-    //  5.2  rho = rho_vec(s_y, phi_)
+    //  5.2  rho = rho_vec(s_y, PHI)
     //  5.3  v_y = yddot_d - Lambda_y*edot_y - k_v*s_y - k_s*rho - z_
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -823,7 +836,6 @@ private:
 
   std::string port_name_;
   double gain_scale_, t_run_;
-  double phi_;
 
   omx::HwConfig hw_;   // modelo del motor, calibracion y limites (YAML del motor)
 

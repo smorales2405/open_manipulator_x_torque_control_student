@@ -7,7 +7,7 @@
  * ──────────────────────────────────────────────────────────────────────────
  * SECCIONES A COMPLETAR:
  *   [1] Trayectoria articular de referencia  →  desiredTrajectory()
- *   [2] Funcion de conmutacion sat(s/phi)    →  rho_scalar()
+ *   [2] Funcion de conmutacion sat(s/phi)    →  rho_scalar(), PHI
  *   [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S, K_I
  *   [4] Ley SMC articular                    →  compute_torque()
  * El resto (hardware Dynamixel, filtro alpha-beta, transicion quintica,
@@ -78,7 +78,6 @@
  *   t_run              [double]  20.0   (duracion del SEGUIMIENTO [s]; total =
  *                                        T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S)
  *   test_num           [int]     1      (CSV: hw_smc_joint_sat_<test_num>.csv)
- *   phi                [double]  0.3    (capa limite para sat(s/phi) [rad/s])
  *   integral           [bool]    false  (activa el termino integral z)
  *   ab_alpha           [double]  0.28   (filtro α-β: ganancia de posicion)
  *   ab_beta            [double]  0.04   (filtro α-β: ganancia de velocidad)
@@ -169,17 +168,17 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //  mili-torques: las ganancias de sim dejan la muneca pegada). Con diag(M),
 //  dentro de la capa cada articulacion equivale a un PD propio con torque
 //  M_ii*(kp_eq*e + kd_eq*e_dot):
-//    kp_eq = Lambda*(K_V + K_S/phi)   kd_eq = Lambda + K_V + K_S/phi
+//    kp_eq = Lambda*(K_V + K_S/PHI)   kd_eq = Lambda + K_V + K_S/PHI
 //  Apuntar a kp_eq del orden de cientos en J1–J3 y de miles en J4.
 //
 //  Con integral:=true se suman kp_eq += K_I y ki_eq = Lambda*K_I.
 //
-//  Rangos recomendados (con phi = 0.3):
+//  Rangos recomendados (los de K_V y K_S suponen PHI = 0.3):
 //    LAMBDA_Q : 15 – 45   [1/s]
 //    K_V      : 10 – 60
 //    K_S      : 1  – 8    [rad/s²]
 //    K_I      : 5  – 80   [1/s²]     (integral de s; solo con integral:=true)
-//  El integral tarda ~(K_V + K_S/phi)/K_I segundos en corregir; para seguir la
+//  El integral tarda ~(K_V + K_S/PHI)/K_I segundos en corregir; para seguir la
 //  friccion entre inversiones de la trayectoria (cada ~3 s) conviene ~1 s. Un
 //  K_I demasiado alto hace "cazar" al brazo en las inversiones (la inercia del
 //  rotor no esta en M(q) y reduce la ganancia real de lazo).
@@ -247,7 +246,15 @@ static Reference desiredTrajectory(double t)
 //
 //  Implementar la saturacion (funcion unica en este nodo):
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
+//
+//  Definir tambien PHI, la capa limite que el nodo pasa como phi a sat:
+//    PHI : 0.2 – 0.5 [rad/s], comun a las 4 articulaciones (los rangos de K_V
+//          y K_S de la SECCION 3 suponen PHI = 0.3). PHI pequena acerca sat a
+//          sign (mas chattering); PHI grande baja K_S/PHI y con ella la
+//          rigidez dentro de la capa.
 // ─────────────────────────────────────────────────────────────────────────────
+static const double PHI = 0.0;   // COMPLETAR [rad/s]
+
 static double rho_scalar(double s, double phi)
 {
   (void)s; (void)phi;
@@ -280,7 +287,6 @@ public:
     this->declare_parameter<double>     ("gain_scale",     1.0);
     this->declare_parameter<double>     ("t_run",          20.0);
     this->declare_parameter<int>        ("test_num",       1);
-    this->declare_parameter<double>     ("phi",            0.3);
     this->declare_parameter<bool>       ("integral",       false);
 
     this->declare_parameter<double>("ab_alpha", 0.28);
@@ -294,7 +300,6 @@ public:
     gain_scale_ = this->get_parameter("gain_scale").as_double();
     t_run_      = this->get_parameter("t_run").as_double();
     const int test_num = this->get_parameter("test_num").as_int();
-    phi_        = this->get_parameter("phi").as_double();
     integral_   = this->get_parameter("integral").as_bool();
 
     ab_alpha_ = get_parameter("ab_alpha").as_double();
@@ -302,11 +307,19 @@ public:
     loop_rate_hz_ = std::min(std::max(get_parameter("loop_rate_hz").as_double(), 50.0), 400.0);
     Ts_ = 1.0 / loop_rate_hz_;
 
+    // PHI se completa en la SECCION 2: sat(s/PHI) necesita PHI > 0. Se
+    // verifica antes de abrir el puerto y habilitar torque.
+    if (!(PHI > 0.0)) {
+      RCLCPP_FATAL(get_logger(),
+        "PHI = %.3f: completar PHI > 0 en la SECCION 2 (capa limite de sat)", PHI);
+      throw std::runtime_error("PHI sin completar");
+    }
+
     RCLCPP_INFO(get_logger(), "puerto=%s  gain=%.2f  t_run(seguimiento)=%.1fs  test=%d",
       port_name_.c_str(), gain_scale_, t_run_, test_num);
     RCLCPP_INFO(get_logger(),
-      "SMC articular hw — rho=sat  phi=%.3f  integral=%s  tau_max=%.2f N·m  T_trans=%.1f s",
-      phi_, integral_ ? "true" : "false", hw_.limits.tau_max, T_TRANS);
+      "SMC articular hw — rho=sat  PHI=%.3f  integral=%s  tau_max=%.2f N·m  T_trans=%.1f s",
+      PHI, integral_ ? "true" : "false", hw_.limits.tau_max, T_TRANS);
     RCLCPP_INFO(get_logger(),
       "Lambda=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]",
       LAMBDA_Q[0], LAMBDA_Q[1], LAMBDA_Q[2], LAMBDA_Q[3],
@@ -427,7 +440,7 @@ private:
     //    M4 (4x4), nle4 (4x1)   — dinamica nominal M(q) y Phi(q,dq)
     //    LAMBDA_Q, k_v, k_s     — ganancias (k_v, k_s ya escaladas)
     //    z_ (4x1)               — termino integral (cero con integral:=false)
-    //    rho_vec(s, phi_)       — funcion de conmutacion vectorial
+    //    rho_vec(s, PHI)        — funcion de conmutacion vectorial
     //
     //  Ley (guia SMC; en hardware SIN tau_fric del URDF — la friccion
     //  real se compensa en torque_to_current con el modelo del motor):
@@ -447,7 +460,7 @@ private:
     // 4.2 Superficie deslizante:
     const Vec4 s_q = Vec4::Zero();    // COMPLETAR
 
-    // 4.3 Funcion de conmutacion: rho = rho_vec(s_q, phi_)
+    // 4.3 Funcion de conmutacion: rho = rho_vec(s_q, PHI)
     const Vec4 rho = Vec4::Zero();    // COMPLETAR
 
     // Termino integral z_ (infraestructura, no modificar):
@@ -671,7 +684,6 @@ private:
 
   std::string port_name_;
   double gain_scale_, t_run_;
-  double phi_;
 
   bool integral_{false};
   Vec4 z_{Vec4::Zero()};              // termino integral [rad/s²]

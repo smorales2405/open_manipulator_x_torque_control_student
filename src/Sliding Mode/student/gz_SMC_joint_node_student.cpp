@@ -52,7 +52,6 @@
 //                                  T_TRANS + t_run + RETURN_TIME_S + HOLD_TIME_S.
 //                                  Al terminar, el nodo se cierra solo.
 //    rho_func  [string]  "sat"   — funcion de conmutacion: "sat" | "sign"
-//    phi       [double]  0.6     — capa limite para sat(s/phi)  [rad/s]
 //    integral  [bool]    false   — activa el termino integral z
 //
 //  CSV generado: data/smc/sim/act1/gz_smc_joint_<rho_func>_<test_num>.csv
@@ -76,7 +75,7 @@
 //  ──────────────────────────────────────────────────────────────────────────
 //  SECCIONES A COMPLETAR:
 //    [1] Trayectoria articular de referencia  →  desiredTrajectory()
-//    [2] Funciones de conmutacion             →  rho_scalar()
+//    [2] Funciones de conmutacion             →  rho_scalar(), PHI
 //    [3] Ganancias SMC                        →  LAMBDA_Q, K_V, K_S, K_I
 //    [4] Ley SMC articular                    →  tick()
 // ============================================================================
@@ -138,7 +137,7 @@ static constexpr double HOLD_TIME_S   = 0.5;   // [s]
 //   · K_S debe superar la perturbacion en aceleracion d = M^-1*dtau de la
 //     incertidumbre que se quiere dominar (±20 % de masa). joint3 y joint4
 //     reciben la mayor perturbacion: su inercia efectiva 1/(M^-1)_ii es diminuta.
-//   · Pendiente dentro de la capa: K_eff = K_V + K_S/phi <= 75 [1/s]. Fuera de
+//   · Pendiente dentro de la capa: K_eff = K_V + K_S/PHI <= 75 [1/s]. Fuera de
 //     la capa solo queda K_V: conviene que no sea pequeno.
 //   · Sin integral, el error DC es ~ d/(Lambda*K_eff).
 //   · Dentro de la capa la ley equivale a un PID:
@@ -204,7 +203,14 @@ static Reference desiredTrajectory(double t)
 //  Implementar rho(s) para cada tipo:
 //    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
 //    sign : rho(s) = +1 si s > 0,  -1 si s < 0,  0 si s == 0
+//
+//  Definir tambien PHI, la capa limite que el nodo pasa como phi a sat:
+//    PHI : 0.2 – 1.0 [rad/s], comun a las 4 articulaciones; solo se usa con
+//          rho_func:=sat. PHI pequena acerca sat a sign (mas chattering); PHI
+//          grande baja K_S/PHI y con ella la rigidez dentro de la capa.
 // ─────────────────────────────────────────────────────────────────────────────
+static const double PHI = 0.0;   // COMPLETAR [rad/s]
+
 enum class RhoFunc { SIGN, SAT };
 
 static double rho_scalar(double s, RhoFunc func, double phi)
@@ -246,12 +252,10 @@ public:
     this->declare_parameter<int>        ("test_num", 1);
     this->declare_parameter<double>     ("t_run",    0.0);
     this->declare_parameter<std::string>("rho_func", "sat");
-    this->declare_parameter<double>     ("phi",      0.6);
     this->declare_parameter<bool>       ("integral", false);
 
     const int         test_num = this->get_parameter("test_num").as_int();
     t_run_                     = this->get_parameter("t_run").as_double();
-    phi_                       = this->get_parameter("phi").as_double();
     integral_                  = this->get_parameter("integral").as_bool();
     const std::string rho_str  = this->get_parameter("rho_func").as_string();
 
@@ -283,9 +287,16 @@ public:
     fric_damping_ = model_.urdfDamping();
     fric_coulomb_ = model_.urdfFriction();
 
+    // PHI se completa en la SECCION 2: sat(s/PHI) necesita PHI > 0
+    if (rho_func_ == RhoFunc::SAT && !(PHI > 0.0)) {
+      RCLCPP_FATAL(this->get_logger(),
+        "PHI = %.3f: completar PHI > 0 en la SECCION 2 (capa limite de sat)", PHI);
+      throw std::runtime_error("PHI sin completar");
+    }
+
     RCLCPP_INFO(this->get_logger(),
-      "SMC articular — rho=%s  phi=%.3f  integral=%s  tau_max=%.2f N·m",
-      rho_str_.c_str(), phi_, integral_ ? "true" : "false", TAU_MAX);
+      "SMC articular — rho=%s  PHI=%.3f  integral=%s  tau_max=%.2f N·m",
+      rho_str_.c_str(), PHI, integral_ ? "true" : "false", TAU_MAX);
     RCLCPP_INFO(this->get_logger(),
       "Lambda=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]",
       LAMBDA_Q[0], LAMBDA_Q[1], LAMBDA_Q[2], LAMBDA_Q[3],
@@ -406,7 +417,7 @@ private:
 
     const Eigen::Matrix4d M = model_.massMatrix(q);
 
-    const Eigen::Vector4d phi_nle = model_.nonlinearEffects(q, dq);
+    const Eigen::Vector4d nle = model_.nonlinearEffects(q, dq);
 
     // Feedforward de friccion del URDF (infraestructura, no modificar):
     // viscosa con dq medida + Coulomb con la velocidad DESEADA ref.dq
@@ -418,8 +429,8 @@ private:
 
     // ─────────────────────────────────────────────────────────────────────────
     //  [SECCION 4] Ley SMC articular — COMPLETAR
-    //  Disponible: M (4x4), phi_nle (4x1), tau_fric (4x1), ref.q, ref.dq, ref.ddq,
-    //              z_ (4x1, termino integral)
+    //  Disponible: M (4x4), nle (4x1), tau_fric (4x1), ref.q, ref.dq, ref.ddq,
+    //              z_ (4x1, termino integral), rho_func_, PHI
     // ─────────────────────────────────────────────────────────────────────────
 
     //  4.1 Errores articulares:
@@ -447,7 +458,7 @@ private:
     tau_saturated_prev_ = (tau.cwiseAbs().maxCoeff() >= TAU_MAX);   // anti-windup (no modificar)
 
     // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
-    (void)M; (void)phi_nle; (void)tau_fric; (void)e_dq; (void)rho; (void)v_q;
+    (void)M; (void)nle; (void)tau_fric; (void)e_dq; (void)rho; (void)v_q;
     // ─────────────────────────────────────────────────────────────────────────
 
     // ── Publicar torques ───────────────────────────────────────────────────
@@ -513,7 +524,6 @@ private:
   double      t_run_;
   RhoFunc     rho_func_;
   std::string rho_str_;
-  double      phi_;
 
   bool            integral_ = false;
   Eigen::Vector4d z_ {0.0, 0.0, 0.0, 0.0};   // termino integral [rad/s²]
