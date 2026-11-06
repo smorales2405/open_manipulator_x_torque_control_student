@@ -19,10 +19,17 @@
  *   e_q  = q  - q_d,   e_dq = dq - dq_d
  *   s_q  = e_dq + Lambda_q * e_q
  *
- * Ley de control SMC (ley de alcance exponencial + conmutacion + integral):
- *   v_q  = ddq_d - Lambda_q*e_dq - K_V*s_q - K_S*sat(s_q/phi) - z
- *   tau  = M(q)*v_q + Phi(q,dq)          [RNEA de Pinocchio]
+ * Ley de control SMC (ley de alcance exponencial + conmutacion + integral),
+ * con la parte robusta escalada por diag(M):
+ *   v_eq  = ddq_d - Lambda_q*e_dq                  (control equivalente)
+ *   a_rob = K_V*s_q + K_S*sat(s_q/phi) + z         (alcance robusto)
+ *   tau   = M(q)*v_eq + Phi(q,dq) - diag(M(q))*a_rob
  *   tau_sat = clamp(tau, -tau_max, tau_max)
+ * En hardware la parte robusta va por diag(M) y no por la M completa: con la
+ * M completa el torque robusto de un eje entra a los demas por M_ij. En el
+ * robot, M34 ~ 3*M44 y la muneca usa ganancias altas, asi que el torque de J4
+ * cancelaba el de J3 y ambas quedaban pegadas por stiction en las
+ * inversiones. Con diag(M) cada eje recibe solo su propio torque robusto.
  *
  * Termino integral de la ley de alcance (parametro integral):
  *   dz/dt = K_I*s_q,   |z_i| <= Z_MAX_i,   z(0) = 0
@@ -73,8 +80,8 @@
  *   test_num           [int]     1      (CSV: hw_smc_joint_sat_<test_num>.csv)
  *   phi                [double]  0.3    (capa limite para sat(s/phi) [rad/s])
  *   integral           [bool]    false  (activa el termino integral z)
- *   ab_alpha           [double]  0.2    (filtro α-β: ganancia de posicion)
- *   ab_beta            [double]  0.02   (filtro α-β: ganancia de velocidad)
+ *   ab_alpha           [double]  0.28   (filtro α-β: ganancia de posicion)
+ *   ab_beta            [double]  0.04   (filtro α-β: ganancia de velocidad)
  *   friction_fc_scale  [double]  0.95   (fraccion de Fc compensada; Fc usa dq DESEADA)
  *   loop_rate_hz       [double]  200.0  (frecuencia del lazo [Hz], acotada [50,400])
  *
@@ -159,8 +166,9 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //
 //  En HARDWARE la stiction real exige rigidez varias veces mayor que en
 //  Gazebo (en joint4, M44 ~ 0.001 kg·m² convierte aceleraciones en
-//  mili-torques: las ganancias de sim dejan la muneca pegada). Dentro de la
-//  capa el SMC equivale a un PD con:
+//  mili-torques: las ganancias de sim dejan la muneca pegada). Con diag(M),
+//  dentro de la capa cada articulacion equivale a un PD propio con torque
+//  M_ii*(kp_eq*e + kd_eq*e_dot):
 //    kp_eq = Lambda*(K_V + K_S/phi)   kd_eq = Lambda + K_V + K_S/phi
 //  Apuntar a kp_eq del orden de cientos en J1–J3 y de miles en J4.
 //
@@ -170,9 +178,11 @@ using Vec4 = Eigen::Matrix<double, NUM_JOINTS, 1>;
 //    LAMBDA_Q : 15 – 45   [1/s]
 //    K_V      : 10 – 60
 //    K_S      : 1  – 8    [rad/s²]
-//    K_I      : 2  – 30   [1/s²]     (integral de s; solo con integral:=true)
-//  El integral debe ser LENTO: la inercia del rotor no esta en M(q) y reduce la
-//  ganancia real de lazo, de modo que un K_I alto oscila aunque elimine el DC.
+//    K_I      : 5  – 80   [1/s²]     (integral de s; solo con integral:=true)
+//  El integral tarda ~(K_V + K_S/phi)/K_I segundos en corregir; para seguir la
+//  friccion entre inversiones de la trayectoria (cada ~3 s) conviene ~1 s. Un
+//  K_I demasiado alto hace "cazar" al brazo en las inversiones (la inercia del
+//  rotor no esta en M(q) y reduce la ganancia real de lazo).
 //  Primer run SIEMPRE con gain_scale:=0.5.
 // ═══════════════════════════════════════════════════════════════════════════
 static const Vec4 LAMBDA_Q = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
@@ -182,7 +192,7 @@ static const Vec4 K_I      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMP
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Tope anti-windup del termino integral |z_i| <= Z_MAX_i [rad/s²] (no modificar)
-static const Vec4 Z_MAX = (Vec4() << 30.0, 30.0, 50.0, 200.0).finished();
+static const Vec4 Z_MAX = (Vec4() << 30.0, 80.0, 120.0, 400.0).finished();
 
 // ============================================================
 // Trayectoria articular de referencia (identica a gz_SMC_joint_node)
@@ -273,8 +283,8 @@ public:
     this->declare_parameter<double>     ("phi",            0.3);
     this->declare_parameter<bool>       ("integral",       false);
 
-    this->declare_parameter<double>("ab_alpha", 0.2);
-    this->declare_parameter<double>("ab_beta",  0.02);
+    this->declare_parameter<double>("ab_alpha", 0.28);
+    this->declare_parameter<double>("ab_beta",  0.04);
     this->declare_parameter<double>("loop_rate_hz", 200.0);
 
     // Modelo del motor, calibracion y limites (config/control/motorXM430W350T_params.yaml)
@@ -421,10 +431,13 @@ private:
     //
     //  Ley (guia SMC; en hardware SIN tau_fric del URDF — la friccion
     //  real se compensa en torque_to_current con el modelo del motor):
-    //    e_q  = q - q_d          e_dq = dq - dq_d
-    //    s_q  = e_dq + Lambda_q .* e_q          (asignar a s_out)
-    //    v_q  = ddq_d - Lambda_q.*e_dq - k_v.*s_q - k_s.*rho(s_q) - z_
-    //    tau  = M4 * v_q + nle4
+    //    e_q   = q - q_d          e_dq = dq - dq_d
+    //    s_q   = e_dq + Lambda_q .* e_q          (asignar a s_out)
+    //    v_eq  = ddq_d - Lambda_q.*e_dq          (control equivalente)
+    //    a_rob = k_v.*s_q + k_s.*rho(s_q) + z_   (alcance robusto)
+    //    tau   = M4 * v_eq + nle4 - diag(M4) .* a_rob
+    //  diag(M4) = M4.diagonal() (vector 4x1); el producto elemento a elemento
+    //  es cwiseProduct.
     // ═══════════════════════════════════════════════════════════════════════
 
     // 4.1 Errores articulares:
@@ -440,16 +453,19 @@ private:
     // Termino integral z_ (infraestructura, no modificar):
     update_integral(s_q, integrate);
 
-    // 4.4 Aceleracion articular virtual:
-    const Vec4 v_q = Vec4::Zero();    // COMPLETAR
+    // 4.4 Control equivalente (aceleracion de referencia):
+    const Vec4 v_eq = Vec4::Zero();   // COMPLETAR
 
-    // 4.5 Torque:
+    // 4.5 Alcance robusto (aceleracion):
+    const Vec4 a_rob = Vec4::Zero();  // COMPLETAR
+
+    // 4.6 Torque:
     const Vec4 tau = Vec4::Zero();    // COMPLETAR
 
     s_out = s_q;
 
     // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
-    (void)M4; (void)nle4; (void)e_q; (void)e_dq; (void)rho; (void)v_q;
+    (void)M4; (void)nle4; (void)e_q; (void)e_dq; (void)rho; (void)v_eq; (void)a_rob;
     (void)k_v; (void)k_s; (void)ref;
     // ═══════════════════════════════════════════════════════════════════════
 
