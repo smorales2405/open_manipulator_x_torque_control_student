@@ -12,6 +12,9 @@
 %   Metricas reportadas en consola (Tabla 3 de la guia, por articulacion):
 %     e_q,max [rad]  |  e_q,RMS [rad]  |  max|tau| [N·m]  |  tau_RMS [N·m]  |  Sat [%]  |  TV(tau)
 %
+% La configuracion del ensayo (integral, escalas de la planta y carga) se
+% muestra en los titulos de las figuras.
+%
 % Configurar la seccion "Configuracion" y ejecutar.
 
 clear; clc; close all;
@@ -23,6 +26,15 @@ mode        = 'sim';    % 'sim'  = simulacion Gazebo (gz_SMC_q_node)
 rho_func    = 'sat';   % Funcion de conmutacion usada: 'sign' | 'sat'
 
 test_num    = 1;        % Identificador del ensayo (test_num usado al lanzar el nodo)
+
+integral      = false;  % true = el nodo se ejecuto con -p integral:=true
+with_load          = false;  % true = con carga en el efector final
+
+% Escalas de la planta en Gazebo (config/control/sim_init_config.yaml). Solo
+% se muestran en los titulos si alguna es distinta de 1.0, y solo en modo 'sim'.
+mass_inertia_scale = 1.0;
+damping_scale      = 1.0;
+friction_scale     = 1.0;
 
 EXPORT_FIGS = false;    % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
                         % false = solo visualizar
@@ -90,10 +102,36 @@ if has_z
     has_z = any(z_int(:) ~= 0);
 end
 
+% Configuracion del ensayo para los titulos: integral y carga siempre; escalas
+% de la planta solo si alguna es distinta de 1.0 (y solo en simulacion)
+if integral ~= has_z
+    if integral
+        warning('integral = true, pero z = 0 en el CSV: revisar test_num o la configuracion.');
+    else
+        warning('integral = false, pero z ~= 0 en el CSV: el ensayo uso el termino integral.');
+    end
+end
+if integral
+    cfg_items = {'con integral'};
+else
+    cfg_items = {'sin integral'};
+end
+scales = [mass_inertia_scale, damping_scale, friction_scale];
+if strcmp(mode, 'sim') && any(scales ~= 1.0)
+    cfg_items{end+1} = sprintf('masa x%g, amort. x%g, fricc. x%g', scales);
+end
+if with_load
+    cfg_items{end+1} = 'con carga';
+else
+    cfg_items{end+1} = 'sin carga';
+end
+cfg_label = strjoin(cfg_items, ' | ');
+
 %% ── Metricas (Tabla 3 de la guia) ───────────────────────────────────────────
 fprintf('\n%s\n', repmat('═', 1, 88));
 fprintf(' Metricas SMC articular  [%s | rho=%s | test=%d]\n', ...
         mode_label, rho_func, test_num);
+fprintf(' Configuracion: %s\n', cfg_label);
 fprintf('%s\n', repmat('═', 1, 88));
 fprintf('%-6s  %-12s  %-12s  %-14s  %-14s  %-10s  %-10s\n', ...
         'Joint', 'e_max[rad]', 'e_RMS[rad]', 'max|tau|[N·m]', 'tau_RMS[N·m]', 'Sat[%]', 'TV(tau)');
@@ -133,11 +171,7 @@ if isfield(rho_tex, rho_func)
 else
     rho_label = rho_func;
 end
-if has_z
-    sub_label = sprintf('[%s | integral | rho = %s]', mode_label, rho_label);
-else
-    sub_label = sprintf('[%s | rho = %s]', mode_label, rho_label);
-end
+sub_label = sprintf('[%s | rho = %s | %s]', mode_label, rho_label, cfg_label);
 
 %% ── Figura 1 — Seguimiento de posiciones articulares ─────────────────────────
 figure(1); clf;
@@ -162,7 +196,7 @@ end
 lgd1 = legend(axs1(1), [h_ref1, h_mea1], {'Referencia', 'Medicion'}, ...
               'Orientation', 'horizontal', 'FontSize', fs, 'Location', 'northoutside');
 lgd1.Layout.Tile = 'north';
-title(tl1, sprintf('SMC Articular — Seguimiento de Posiciones  %s', sub_label), ...
+title(tl1, {'SMC Articular — Seguimiento de Posiciones', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold');
 
 %% ── Figura 2 — Error de seguimiento articular ────────────────────────────────
@@ -182,7 +216,7 @@ for i = 1:4
     xlim(xlims);
 end
 
-title(tl2, sprintf('SMC Articular — Error de Seguimiento Articular  %s', sub_label), ...
+title(tl2, {'SMC Articular — Error de Seguimiento Articular', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold');
 
 %% ── Figura 3 — Seguimiento de velocidades articulares ────────────────────────
@@ -208,7 +242,7 @@ end
 lgd3 = legend(axs3(1), [h_ref3, h_mea3], {'Referencia', 'Medicion'}, ...
               'Orientation', 'horizontal', 'FontSize', fs, 'Location', 'northoutside');
 lgd3.Layout.Tile = 'north';
-title(tl3, sprintf('SMC Articular — Seguimiento de Velocidades  %s', sub_label), ...
+title(tl3, {'SMC Articular — Seguimiento de Velocidades', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold');
 
 %% ── Figura 4 — Superficies deslizantes ───────────────────────────────────────
@@ -228,7 +262,7 @@ for i = 1:4
     xlim(xlims);
 end
 
-title(tl4, sprintf('SMC Articular — Superficies Deslizantes  %s', sub_label), ...
+title(tl4, {'SMC Articular — Superficies Deslizantes', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold');
 
 %% ── Figura 5 — Torques de control ────────────────────────────────────────────
@@ -252,7 +286,7 @@ for i = 1:4
     xlim(xlims);
 end
 
-title(tl5, sprintf('SMC Articular — Torques de Control  %s', sub_label), ...
+title(tl5, {'SMC Articular — Torques de Control', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold');
 
 %% ── Figura 6 — Termino integral ──────────────────────────────────────────────
@@ -273,7 +307,7 @@ if has_z
         xlim(xlims);
     end
 
-    title(tl6, sprintf('SMC Articular — Termino Integral  %s', sub_label), ...
+    title(tl6, {'SMC Articular — Termino Integral', sub_label}, ...
           'FontSize', fs_title, 'FontWeight', 'bold');
 end
 
