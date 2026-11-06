@@ -6,9 +6,12 @@
 % Se deben completar:
 %
 %   SECCION 1 — Trayectoria de referencia articular   (funcion trayectoria_deseada)
-%   SECCION 2 — Ganancias del controlador              (LAMBDA_Q, K_V, K_S, phi, TAU_MAX)
-%   SECCION 3 — Ley de control                         (dentro del lazo a 200 Hz y
+%   SECCION 2 — Ganancias del controlador SMC          (LAMBDA_Q, K_V, K_S, phi, TAU_MAX)
+%   SECCION 3 — Ley de control SMC                     (dentro del lazo a 200 Hz y
 %                                                       funcion rho_vec: sat y sign)
+%   SECCION 4 — Ganancias de Feedback Linearization    (KP, KD)
+%   SECCION 5 — Ley de control de Feedback Linearization (dentro del lazo a 200 Hz)
+%   Las secciones 4 y 5 solo se usan con COMPARE_FL = true.
 %
 % Infraestructura proporcionada:
 %   - Carga de OMDyn (MEX) y calculo de M(q), phib(q,dq)
@@ -32,6 +35,9 @@
 % Figuras de seguimiento: (posiciones, errores, superficies y
 % torques) + tabla de metricas en consola (sin el transitorio inicial).
 %
+% Comparacion con COMPARE_FL = true: simula SMC y FL sobre la misma planta y
+% genera solo la tabla y las figuras comparativas de posiciones y torques.
+%
 
 clear; clc; close all;
 
@@ -43,6 +49,8 @@ EXPORT_FIGS = false;   % true = guardar PNG (300 dpi) y EPS vectorial (600 dpi) 
                        %        plots/ junto al script
 
 rho_func    = 'sat';   % funcion de conmutacion: 'sat' | 'sign'
+
+COMPARE_FL  = false;   % true = comparar SMC con Feedback Linearization (ver cabecera)
 
 % ── Escalas de la planta ─────────
 % Solo afectan a la planta simulada; el controlador usa el modelo nominal.
@@ -76,6 +84,7 @@ assert(~isempty(which('OMDyn')), ...
 assert(isfolder(mesh_dir), 'No se encontro la carpeta meshes/ junto al script.');
 assert(any(strcmp(rho_func, {'sat', 'sign'})), ...
     'rho_func debe ser ''sat'' o ''sign''.');
+if COMPARE_FL, ANIM_MODE = 'off'; end   % la comparacion no usa la vista 3D
 
 fprintf('Modelo OMDyn: %s\n', which('OMDyn'));
 fprintf(['Feedforward de friccion: damping=[%.4f %.4f %.4f %.4f]  ' ...
@@ -117,7 +126,7 @@ if strcmp(ANIM_MODE, 'live')
 end
 
 % ═══════════════════════════════════════════════════════════════════════════
-%  SECCION 2 — GANANCIAS DEL CONTROLADOR  (COMPLETAR)
+%  SECCION 2 — GANANCIAS DEL CONTROLADOR SMC  (COMPLETAR)
 % -------------------------------------------------------------------
 %  Indice de cada elemento:  [joint1, joint2, joint3, joint4]
 LAMBDA_Q = [0.0; 0.0; 0.0; 0.0];   % COMPLETAR
@@ -127,85 +136,226 @@ phi      = 0.0;                    % COMPLETAR  [rad/s] capa limite de sat (no s
 TAU_MAX  = 0.0;                    % COMPLETAR  [N·m]
 % ═══════════════════════════════════════════════════════════════════════════
 
+% ═══════════════════════════════════════════════════════════════════════════
+%  SECCION 4 — GANANCIAS DE FEEDBACK LINEARIZATION  (COMPLETAR, con COMPARE_FL = true)
+% -------------------------------------------------------------------
+%  Indice de cada elemento:  [joint1, joint2, joint3, joint4]
+KP = [0.0; 0.0; 0.0; 0.0];   % COMPLETAR
+KD = [0.0; 0.0; 0.0; 0.0];   % COMPLETAR
+% ═══════════════════════════════════════════════════════════════════════════
+
 fprintf('Lambda=[%.1f %.1f %.1f %.1f]  Kv=[%.1f %.1f %.1f %.1f]  Ks=[%.1f %.1f %.1f %.1f]\n', ...
     LAMBDA_Q, K_V, K_S);
-fprintf('rho=%s  phi=%.3f  tau_max=%.2f N·m\n\n', rho_func, phi, TAU_MAX);
+fprintf('rho=%s  phi=%.3f  tau_max=%.2f N·m\n', rho_func, phi, TAU_MAX);
+if COMPARE_FL
+    fprintf('FL: Kp=[%.1f %.1f %.1f %.1f]  Kd=[%.1f %.1f %.1f %.1f]\n', KP, KD);
+end
+fprintf('\n');
 
 %% ── Seccion 3: Lazo de control a 200 Hz ──────────────────────
-Q = zeros(Nsim+1, 4); DQ = zeros(Nsim+1, 4); TAU = zeros(Nsim+1, 4); S = zeros(Nsim+1, 4);
+% Con COMPARE_FL = true se simula la misma planta con cada ley de control.
+if COMPARE_FL
+    LEYES = {'SMC', 'FL'};
+else
+    LEYES = {'SMC'};
+end
+LOG = struct();
 
 Fv_plant = damping_scale * Fv;   % friccion viscosa de la planta
 
-x = [q0; dq0];
-t0_wall = tic;
-for k = 1:Nsim
-    % ── Leer estado ───────────────────────────
-    q  = x(1:4);
-    dq = x(5:8);
+for i_ley = 1:numel(LEYES)
+    ley = LEYES{i_ley};
 
-    % ── Referencia del tick ───────────────────────────────────────────────
-    qd = QD(k,:)'; dqd = DQD(k,:)'; ddqd = DDQD(k,:)';
+    Q = zeros(Nsim+1, 4); DQ = zeros(Nsim+1, 4); TAU = zeros(Nsim+1, 4); S = zeros(Nsim+1, 4);
 
-    % ── Matriz de masa M(q) y efectos no lineales phib(q,dq) ─
-    [M, phib] = OMDyn(q, dq);
+    x = [q0; dq0];
+    t0_wall = tic;
+    for k = 1:Nsim
+        % ── Leer estado ───────────────────────────
+        q  = x(1:4);
+        dq = x(5:8);
 
-    % ══════════════════════════════════════════════════════════════════════
-    %  SECCION 3 — LEY DE CONTROL  (COMPLETAR)
-    %  Funcion de conmutacion: rho_vec(s_q, rho_func, phi)
-    % -------------------------------------------------------------------
-    e_q = zeros(4,1);
-    s_q = zeros(4,1);
-    tau = zeros(4,1);
+        % ── Referencia del tick ───────────────────────────────────────────
+        qd = QD(k,:)'; dqd = DQD(k,:)'; ddqd = DDQD(k,:)';
 
-    % ══════════════════════════════════════════════════════════════════════
+        % ── Matriz de masa M(q) y efectos no lineales phib(q,dq) ─
+        [M, phib] = OMDyn(q, dq);
 
-    % ── Feedforward de friccion
-    tau = tau + Fv.*dq + Fc.*tanh(dqd / F_eps);
+        if strcmp(ley, 'SMC')
+            % ══════════════════════════════════════════════════════════════
+            %  SECCION 3 — LEY DE CONTROL SMC  (COMPLETAR)
+            %  Funcion de conmutacion: rho_vec(s_q, rho_func, phi)
+            % -----------------------------------------------------------
+            e_q = zeros(4,1);
+            s_q = zeros(4,1);
+            tau = zeros(4,1);
 
-    % ── Saturacion de torque ──────────────────────────────────────────────
-    tau_sat = min(max(tau, -TAU_MAX), TAU_MAX);
+            % ══════════════════════════════════════════════════════════════
+        else
+            s_q = zeros(4,1);   % FL no usa superficie deslizante
 
-    % ── Registro ──────────────────────────────
-    Q(k,:) = q'; DQ(k,:) = dq'; S(k,:) = s_q'; TAU(k,:) = tau_sat';
+            % ══════════════════════════════════════════════════════════════
+            %  SECCION 5 — LEY DE CONTROL FL  (COMPLETAR, con COMPARE_FL = true)
+            % -----------------------------------------------------------
+            e_q = zeros(4,1);
+            tau = zeros(4,1);
 
-    % ── Planta: RK4 con ZOH del torque ──────────────
-    h = Ts / N_SUB;
-    for i_sub = 1:N_SUB
-        x = rk4_step(x, tau_sat, h, Fv_plant, Fc, eps_plant, mass_inertia_scale);
-    end
-
-    % ── Animacion en vivo + ritmo de tiempo real (solo 'live') ───────────
-    if strcmp(ANIM_MODE, 'live')
-        if mod(k-1, ANIM_DECIM) == 0
-            trace_add(H, q);
-            if toc(t0_wall) <= t_log(k) + Ts
-                update_robot3d(H, q, t_log(k));
-                drawnow;
-            end
+            % ══════════════════════════════════════════════════════════════
         end
-        sobra = t_log(k) + Ts - toc(t0_wall);
-        if sobra > 0, pause(sobra); end
+
+        % ── Feedforward de friccion
+        tau = tau + Fv.*dq + Fc.*tanh(dqd / F_eps);
+
+        % ── Saturacion de torque ──────────────────────────────────────────
+        tau_sat = min(max(tau, -TAU_MAX), TAU_MAX);
+
+        % ── Registro ──────────────────────────────
+        Q(k,:) = q'; DQ(k,:) = dq'; S(k,:) = s_q'; TAU(k,:) = tau_sat';
+
+        % ── Planta: RK4 con ZOH del torque ──────────────
+        h = Ts / N_SUB;
+        for i_sub = 1:N_SUB
+            x = rk4_step(x, tau_sat, h, Fv_plant, Fc, eps_plant, mass_inertia_scale);
+        end
+
+        % ── Animacion en vivo + ritmo de tiempo real (solo 'live') ───────
+        if strcmp(ANIM_MODE, 'live')
+            if mod(k-1, ANIM_DECIM) == 0
+                trace_add(H, q);
+                if toc(t0_wall) <= t_log(k) + Ts
+                    update_robot3d(H, q, t_log(k));
+                    drawnow;
+                end
+            end
+            sobra = t_log(k) + Ts - toc(t0_wall);
+            if sobra > 0, pause(sobra); end
+        end
+
+        if mod(k, round(1/Ts)) == 0
+            fprintf('[%s] t=%5.2f s  |s|=%.5f  |e|=%.5f rad  tau=[%+.3f %+.3f %+.3f %+.3f] Nm\n', ...
+                    ley, t_log(k), norm(s_q), norm(e_q), tau_sat);
+        end
     end
 
-    if mod(k, round(1/Ts)) == 0
-        fprintf('t=%5.2f s  |s|=%.5f  |e|=%.5f rad  tau=[%+.3f %+.3f %+.3f %+.3f] Nm\n', ...
-                t_log(k), norm(s_q), norm(e_q), tau_sat);
+    Q(Nsim+1,:)   = x(1:4)';
+    DQ(Nsim+1,:)  = x(5:8)';
+    TAU(Nsim+1,:) = TAU(Nsim,:);
+    S(Nsim+1,:)   = S(Nsim,:);
+
+    fprintf('Simulacion %s completada (%.1f s).\n\n', ley, T_SIM);
+
+    % Verificacion de limites articulares del URDF
+    for i = 1:4
+        if any(Q(:,i) < Q_LOWER(i)) || any(Q(:,i) > Q_UPPER(i))
+            warning('%s: q%d salio de los limites del URDF [%.3f, %.3f] rad.', ...
+                    ley, i, Q_LOWER(i), Q_UPPER(i));
+        end
     end
+
+    LOG.(ley) = struct('Q', Q, 'TAU', TAU);
 end
 
-Q(Nsim+1,:)   = x(1:4)';
-DQ(Nsim+1,:)  = x(5:8)';
-TAU(Nsim+1,:) = TAU(Nsim,:);
-S(Nsim+1,:)   = S(Nsim,:);
+%% ── Estilo comun de las figuras ──────────────────────────────────────────────
+lw         = 1.6;
+fs         = 11;
+fs_title   = 12;
+color_ref  = [0.8500 0.3250 0.0980];   % naranja — referencia
+color_meas = [0.0000 0.4470 0.7410];   % azul    — simulacion
+color_surf = [0.4940 0.1840 0.5560];   % violeta — superficies deslizantes
+color_tau  = [0.4660 0.6740 0.1880];   % verde   — torque
+color_fl   = [0.4660 0.6740 0.1880];   % verde   — FL en la comparacion
+jointNames = {'Articulacion 1', 'Articulacion 2', ...
+              'Articulacion 3', 'Articulacion 4'};
+xlims      = [t_log(1), t_log(end)];
+if strcmp(rho_func, 'sat')
+    rho_label = sprintf('sat(s/%.2f)', phi);
+else
+    rho_label = 'sign(s)';
+end
+mode_label = sprintf('Prelab | rho = %s | escalas %.1f/%.1f', rho_label, ...
+                     mass_inertia_scale, damping_scale);
 
-fprintf('Simulacion completada (%.1f s).\n\n', T_SIM);
-
-% Verificacion de limites articulares del URDF
-for i = 1:4
-    if any(Q(:,i) < Q_LOWER(i)) || any(Q(:,i) > Q_UPPER(i))
-        warning('q%d salio de los limites del URDF [%.3f, %.3f] rad.', ...
-                i, Q_LOWER(i), Q_UPPER(i));
+%% ── Comparacion FL vs SMC (solo con COMPARE_FL = true) ───────────────────────
+if COMPARE_FL
+    % Metricas por articulacion, excluyendo el transitorio inicial (T_REG)
+    m_reg = t_log >= T_REG;
+    fprintf('%s\n', repmat('═', 1, 94));
+    fprintf(' Comparacion FL vs SMC  [Prelab | rho=%s | escalas %.2f/%.2f]  (t >= %.1f s)\n', ...
+            rho_func, mass_inertia_scale, damping_scale, T_REG);
+    fprintf('%s\n', repmat('═', 1, 94));
+    fprintf('%-6s  %-4s  %-12s  %-12s  %-14s  %-14s  %-10s  %-10s\n', ...
+            'Joint', 'Ley', 'e_max[rad]', 'e_RMS[rad]', 'max|tau|[N·m]', 'tau_RMS[N·m]', 'Sat[%]', 'TV(tau)');
+    for i = 1:4
+        fprintf('%s\n', repmat('-', 1, 94));
+        for ley_cmp = {'FL', 'SMC'}
+            ley   = ley_cmp{1};
+            e_i   = LOG.(ley).Q(m_reg, i) - QD(m_reg, i);
+            tau_i = LOG.(ley).TAU(m_reg, i);
+            fprintf('q%-5d  %-4s  %12.5f  %12.5f  %14.4f  %14.4f  %10.2f  %10.4f\n', i, ley, ...
+                    max(abs(e_i)), sqrt(mean(e_i.^2)), ...
+                    max(abs(tau_i)), sqrt(mean(tau_i.^2)), ...
+                    100 * mean(abs(tau_i) >= 0.99*TAU_MAX), ...
+                    sum(abs(diff(tau_i))));
+        end
     end
+    fprintf('%s\n\n', repmat('═', 1, 94));
+
+    % ── Figura 1 — Posiciones articulares: FL vs SMC ─────────────────────
+    figure(1); clf;
+    set(gcf, 'Color', 'w', 'Position', [100 100 1100 700]);
+    tl1 = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    for i = 1:4
+        nexttile(tl1);
+        h_smc = plot(t_log, LOG.SMC.Q(:,i), '-',  'Color', color_meas, 'LineWidth', lw); hold on;
+        h_fl  = plot(t_log, LOG.FL.Q(:,i),  '-',  'Color', color_fl,   'LineWidth', lw);
+        h_ref = plot(t_log, QD(:,i),        '--', 'Color', color_ref,  'LineWidth', lw);
+        xlabel('Tiempo [s]', 'FontSize', fs);
+        ylabel(sprintf('$q_%d$ [rad]', i), 'Interpreter', 'latex', 'FontSize', fs);
+        title(jointNames{i}, 'FontSize', fs_title);
+        grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
+    end
+    lgd1 = legend(gca, [h_ref, h_fl, h_smc], {'Referencia', 'FL', 'SMC'}, ...
+                  'Orientation', 'horizontal', 'FontSize', fs, 'Location', 'northoutside');
+    lgd1.Layout.Tile = 'north';
+    title(tl1, sprintf('[%s] FL vs SMC - Seguimiento de posiciones articulares', mode_label), ...
+          'FontSize', 14, 'FontWeight', 'bold');
+
+    % ── Figura 2 — Torques de control: FL vs SMC ─────────────────────────
+    figure(2); clf;
+    set(gcf, 'Color', 'w', 'Position', [140 140 1100 700]);
+    tl2 = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    for i = 1:4
+        nexttile(tl2);
+        h_smc = plot(t_log, LOG.SMC.TAU(:,i), '-', 'Color', color_meas, 'LineWidth', lw); hold on;
+        h_fl  = plot(t_log, LOG.FL.TAU(:,i),  '-', 'Color', color_fl,   'LineWidth', lw);
+        xlabel('Tiempo [s]', 'FontSize', fs);
+        ylabel(sprintf('$\\tau_%d\\;[\\mathrm{N\\cdot m}]$', i), ...
+               'Interpreter', 'latex', 'FontSize', fs);
+        title(jointNames{i}, 'FontSize', fs_title);
+        grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
+    end
+    lgd2 = legend(gca, [h_fl, h_smc], {'FL', 'SMC'}, ...
+                  'Orientation', 'horizontal', 'FontSize', fs, 'Location', 'northoutside');
+    lgd2.Layout.Tile = 'north';
+    title(tl2, sprintf('[%s] FL vs SMC - Torques de control calculados', mode_label), ...
+          'FontSize', 14, 'FontWeight', 'bold');
+
+    if EXPORT_FIGS
+        output_dir = fullfile(this_dir, 'plots');
+        if ~exist(output_dir, 'dir'), mkdir(output_dir); end
+
+        % PNG (raster, 300 dpi)
+        exportgraphics(figure(1), fullfile(output_dir, 'tracking_plot_q_fl_vs_smc.png'), 'Resolution', 300);
+        exportgraphics(figure(2), fullfile(output_dir, 'torques_plot_fl_vs_smc.png'),    'Resolution', 300);
+
+        % EPS (vectorial, 600 dpi)
+        exportgraphics(figure(1), fullfile(output_dir, 'tracking_plot_q_fl_vs_smc.eps'), 'ContentType', 'vector', 'Resolution', 600);
+        exportgraphics(figure(2), fullfile(output_dir, 'torques_plot_fl_vs_smc.eps'),    'ContentType', 'vector', 'Resolution', 600);
+
+        fprintf('Graficas guardadas en: %s\n', output_dir);
+    end
+
+    return;   % con COMPARE_FL = true solo se genera lo comparativo
 end
 
 %% ── Seccion 4: Animacion 3D posterior (dt = 1/200 s por frame) ─────
@@ -253,24 +403,6 @@ for i = 1:4
             sum(abs(diff(tau_i))));
 end
 fprintf('%s\n\n', repmat('═', 1, 88));
-
-lw         = 1.6;
-fs         = 11;
-fs_title   = 12;
-color_ref  = [0.8500 0.3250 0.0980];   % naranja — referencia
-color_meas = [0.0000 0.4470 0.7410];   % azul    — simulacion
-color_surf = [0.4940 0.1840 0.5560];   % violeta — superficies deslizantes
-color_tau  = [0.4660 0.6740 0.1880];   % verde   — torque
-jointNames = {'Articulacion 1', 'Articulacion 2', ...
-              'Articulacion 3', 'Articulacion 4'};
-xlims      = [t_log(1), t_log(end)];
-if strcmp(rho_func, 'sat')
-    rho_label = sprintf('sat(s/%.2f)', phi);
-else
-    rho_label = 'sign(s)';
-end
-mode_label = sprintf('Prelab | rho = %s | escalas %.1f/%.1f', rho_label, ...
-                     mass_inertia_scale, damping_scale);
 
 % ── Figura 1 — Posiciones articulares ────────────────────────────────────────
 figure(1); clf;

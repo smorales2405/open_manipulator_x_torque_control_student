@@ -15,6 +15,9 @@
 %     Por articulacion:      max|tau| [N·m]   |  tau_RMS [N·m]  |  Sat [%]  |  TV(tau)
 %     Global:                max kappa(J_y)
 %
+% La configuracion del ensayo (integral, escalas de la planta y carga) se
+% muestra en los titulos de las figuras.
+%
 % Configurar la seccion "Configuracion" y ejecutar.
 
 clear; clc; close all;
@@ -26,6 +29,15 @@ mode        = 'sim';    % 'sim'  = simulacion Gazebo (gz_smc_cart_node)
 rho_func    = 'sat';   % Funcion de conmutacion: 'sign' | 'sat'
 
 test_num    = 1;        % Identificador del ensayo (test_num usado al lanzar el nodo)
+
+with_integral      = false;  % true = el nodo se ejecuto con -p integral:=true
+with_load          = false;  % true = con carga en el efector final
+
+% Escalas de la planta en Gazebo (config/control/sim_init_config.yaml). Solo
+% se muestran en los titulos si alguna es distinta de 1.0, y solo en modo 'sim'.
+mass_inertia_scale = 1.0;
+damping_scale      = 1.0;
+friction_scale     = 1.0;
 
 EXPORT_FIGS = false;    % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
                         % false = solo visualizar
@@ -103,6 +115,31 @@ if has_z
     has_z = any(z_int(:) ~= 0);
 end
 
+% Configuracion del ensayo para los titulos: integral y carga siempre; escalas
+% de la planta solo si alguna es distinta de 1.0 (y solo en simulacion)
+if with_integral ~= has_z
+    if with_integral
+        warning('with_integral = true, pero z = 0 en el CSV: revisar test_num o la configuracion.');
+    else
+        warning('with_integral = false, pero z ~= 0 en el CSV: el ensayo uso el termino integral.');
+    end
+end
+if with_integral
+    cfg_items = {'con integral'};
+else
+    cfg_items = {'sin integral'};
+end
+scales = [mass_inertia_scale, damping_scale, friction_scale];
+if strcmp(mode, 'sim') && any(scales ~= 1.0)
+    cfg_items{end+1} = sprintf('masa x%g, amort. x%g, fricc. x%g', scales);
+end
+if with_load
+    cfg_items{end+1} = 'con carga';
+else
+    cfg_items{end+1} = 'sin carga';
+end
+cfg_label = strjoin(cfg_items, ' | ');
+
 %% ── Metricas (Tabla 5 de la guia) ───────────────────────────────────────────
 cartNames  = {'x [m]', 'y [m]', 'z [m]', 'phi [rad]'};
 cartSymbol = {'e_x', 'e_y', 'e_z', 'e_phi'};
@@ -110,6 +147,7 @@ cartSymbol = {'e_x', 'e_y', 'e_z', 'e_phi'};
 fprintf('\n%s\n', repmat('═', 1, 78));
 fprintf(' Metricas SMC Cartesiano  [%s | rho=%s | test=%d]\n', ...
         mode_label, rho_func, test_num);
+fprintf(' Configuracion: %s\n', cfg_label);
 fprintf('%s\n', repmat('═', 1, 78));
 
 fprintf('\n  Errores de seguimiento cartesiano:\n');
@@ -164,11 +202,7 @@ if isfield(rho_tex, rho_func)
 else
     rho_label = rho_func;
 end
-if has_z
-    sub_label = sprintf('[%s | integral | \\rho = %s]', mode_label, rho_label);
-else
-    sub_label = sprintf('[%s | \\rho = %s]', mode_label, rho_label);
-end
+sub_label = sprintf('[%s | \\rho = %s | %s]', mode_label, rho_label, cfg_label);
 
 %% ── Figura 1 — Seguimiento cartesiano ───────────────────────────────────────
 figure(1); clf;
@@ -193,7 +227,7 @@ end
 lgd1 = legend(axs1(1), [h_ref1, h_mea1], {'Referencia', 'Medicion'}, ...
               'Orientation', 'horizontal', 'FontSize', fs, 'Location', 'northoutside');
 lgd1.Layout.Tile = 'north';
-title(tl1, sprintf('SMC Cartesiano — Seguimiento Cartesiano  %s', sub_label), ...
+title(tl1, {'SMC Cartesiano — Seguimiento Cartesiano', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 
 %% ── Figura 2 — Errores de seguimiento cartesiano ────────────────────────────
@@ -215,7 +249,7 @@ for i = 1:4
     xlim(xlims);
 end
 
-title(tl2, sprintf('SMC Cartesiano — Errores de Seguimiento  %s', sub_label), ...
+title(tl2, {'SMC Cartesiano — Errores de Seguimiento', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 
 %% ── Figura 3 — Seguimiento de velocidades cartesianas ───────────────────────
@@ -246,7 +280,7 @@ end
 lgd3 = legend(axs3(1), [h_ref3, h_mea3], {'Referencia', 'Medicion'}, ...
               'Orientation', 'horizontal', 'FontSize', fs, 'Location', 'northoutside');
 lgd3.Layout.Tile = 'north';
-title(tl3, sprintf('SMC Cartesiano — Velocidades Cartesianas  %s', sub_label), ...
+title(tl3, {'SMC Cartesiano — Velocidades Cartesianas', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 
 %% ── Figura 4 — Posiciones articulares q1..q4 ────────────────────────────────
@@ -265,7 +299,7 @@ for i = 1:4
     xlim(xlims);
 end
 
-title(tl4, sprintf('SMC Cartesiano — Posiciones Articulares  %s', sub_label), ...
+title(tl4, {'SMC Cartesiano — Posiciones Articulares', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 
 %% ── Figura 5 — Superficies deslizantes s1..s4 ───────────────────────────────
@@ -289,7 +323,7 @@ for i = 1:4
     xlim(xlims);
 end
 
-title(tl5, sprintf('SMC Cartesiano — Superficies Deslizantes  %s', sub_label), ...
+title(tl5, {'SMC Cartesiano — Superficies Deslizantes', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 
 %% ── Figura 6 — Torques de control tau1..tau4 ────────────────────────────────
@@ -313,7 +347,7 @@ for i = 1:4
     xlim(xlims);
 end
 
-title(tl6, sprintf('SMC Cartesiano — Torques de Control  %s', sub_label), ...
+title(tl6, {'SMC Cartesiano — Torques de Control', sub_label}, ...
       'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 
 %% ── Figura 7 — Termino integral z1..z4 ──────────────────────────────────────
@@ -337,7 +371,7 @@ if has_z
         xlim(xlims);
     end
 
-    title(tl7, sprintf('SMC Cartesiano — Termino Integral  %s', sub_label), ...
+    title(tl7, {'SMC Cartesiano — Termino Integral', sub_label}, ...
           'FontSize', fs_title, 'FontWeight', 'bold', 'Interpreter', 'tex');
 end
 
