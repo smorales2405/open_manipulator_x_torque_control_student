@@ -256,6 +256,7 @@ open_manipulator_x_torque_control/
 │   │   └── MATLAB/                   # Trajectory generation and analysis scripts
 │   ├── Model Reference Adaptive Control/  # 12-parameter joint MRAC (sim and HW)
 │   ├── Forward Kinematics/           # HW FK node and RViz display node
+│   │   └── MATLAB/                   # Analytic FK and Cartesian reference of the SMC trajectory
 │   ├── Identification/               # Torque→current model ID (excitation node + Python OLS/friction)
 │   └── Diagnostics/                  # Low-level torque diagnostic nodes
 ├── urdf/
@@ -385,6 +386,8 @@ ros2 launch open_manipulator_x_torque_control fkin_rviz.launch.py
 ```
 
 This launches `hw_fkin_node` together with `fkin_display_node.py`, which publishes the end-effector pose as a marker, and opens RViz with the pre-configured `config/forward_kinematics/fkin_rviz.rviz` layout.
+
+MATLAB: `src/Forward Kinematics/MATLAB/open_manx_fkin.m` returns the end-effector pose `[x, y, z, φ]` for a joint vector `q`. `fk_cart_ref.m` uses it to obtain the Cartesian reference of the SMC joint trajectory and its Fourier series (requires the Symbolic Math Toolbox).
 
 ---
 
@@ -567,16 +570,9 @@ rho_func = 'sign';  % 'sign' or 'sat'
 test_num = 1;
 run('src/Sliding Mode/MATLAB/plots_SMC_joint.m')
 
-% sign vs sat comparison:
-test_num_sign = 1;
-test_num_sat  = 2;
-run('src/Sliding Mode/MATLAB/plots_SMC_comp_sf_joint.m')
-
-% Robustness comparison (nominal vs uncertainty or load):
-robustness_test = 'params';  % 'params' or 'load'
-test_num_nominal = 2;
-test_num_perturb = 3;
-run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_joint.m')
+% Comparison of two or more runs (sign vs sat, without vs with integral,
+% SMC vs FL): set "comparison" and the test_num values inside the script
+run('src/Sliding Mode/MATLAB/plots_SMC_comp_joint.m')
 ```
 
 #### Activity 2 — Cartesian SMC
@@ -606,13 +602,6 @@ Data saved to: `data/smc/sim/act2/gz_smc_cart_<rho>_<N>.csv`
 rho_func = 'sat';
 test_num = 2;
 run('src/Sliding Mode/MATLAB/plots_SMC_cart.m')
-
-% sign vs sat comparison:
-run('src/Sliding Mode/MATLAB/plots_SMC_comp_sf_cart.m')
-
-% Robustness comparison:
-robustness_test = 'load';  % 'params' or 'load'
-run('src/Sliding Mode/MATLAB/plots_SMC_comp_rob_cart.m')
 ```
 
 ---
