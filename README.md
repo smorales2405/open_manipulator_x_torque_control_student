@@ -348,6 +348,8 @@ load_x_offset: 0.015   # [m]
 | SMC Articular — incertidumbre | `true` | `[0.0, 0.931, 0.35, -1.49]` | `mass_inertia_scale: 1.2`, `damping_scale: 1.1` |
 | SMC Articular — carga | `true` | `[0.0, 0.931, 0.35, -1.49]` | `spawn_load: true` |
 | SMC Cartesiano | `true` | `[0.0, 0.931, 0.35, -1.49]` | Same scales and load options as the joint-space node |
+| MRAC Articular | `true` | `[0.0, 0.931, 0.35, -1.49]` | Same trajectory as the SMC; nominal or `damping_scale`/`friction_scale` 1.5 |
+| MRAC Articular — carga | `true` | `[0.0, 0.931, 0.35, -1.49]` | `spawn_load: true`; keep `mass_inertia_scale: 1.0` (with 1.15 and the load, J2 exceeds 1.2 N·m at `q_init`) |
 
 ---
 
