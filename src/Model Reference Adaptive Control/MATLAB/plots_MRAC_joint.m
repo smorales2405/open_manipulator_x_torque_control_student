@@ -1,10 +1,13 @@
-%% plots_MRAC_joint_12p.m
+%% plots_MRAC_joint.m
 % Graficas para el MRAC articular de 12 PARAMETROS
 %   [alpha1..3, theta_load (dm, dmcx, dmcy, dmcz), Fv1, Fc1..4]
 % OpenMANIPULATOR-X (nodos gz_mrac_joint_12p_node y hw_mrac_joint_12p_node)
 %
 %   El CSV incluye la transicion inicial de T_TRANS_S s; se descarta para que
 %   metricas y graficas sean solo de seguimiento (como plots_SMC_joint.m).
+%   Con with_load = true (Actividad 3, t_run de 40 s) las metricas se calculan
+%   desde T_METRICS_LOAD s de seguimiento: en la primera parte el MRAC todavia
+%   esta aprendiendo la carga. Las graficas muestran el ensayo completo.
 %
 %   Figura 1 — Seguimiento de posiciones articulares  q1..q4
 %   Figura 2 — Error de seguimiento articular         e_q1..e_q4
@@ -14,7 +17,7 @@
 %   Figura 6 — Parametros estimados (2x2): alpha_hat, theta_load_hat
 %               (dm/dmc en ejes izq/der), Fv1_hat, Fc_hat — con lineas de
 %               referencia en los valores VERDADEROS de la planta (escalas de
-%               config/control/sim_init_config.yaml y carga LOAD_TRUE). La
+%               config/control/sim_init_config.yaml y carga segun with_load). La
 %               friccion nominal se lee de config/control/motorXM430W350T_params.yaml
 %               (Fv = motor_Fv/motor_alpha, Fc = motor_Fc/motor_alpha), de donde
 %               la toman la planta de Gazebo y el URDF de los nodos.
@@ -34,14 +37,20 @@ mode        = 'sim';        % 'sim'  = simulacion Gazebo (gz_mrac_joint_12p_node
                             %   de corriente del motor (prior 0), y las escalas
                             %   de la planta no aplican.
 
-ctrl_mode   = 'adaptive';   % Caso simulado (debe coincidir con los parametros del nodo):
-                            %   'adaptive'         adaptive:=true  friction_prior:=true
-                            %   'fixed'            adaptive:=false friction_prior:=true
-                            %   'adaptive_noprior' adaptive:=true  friction_prior:=false
-                            %   'fixed_noprior'    adaptive:=false friction_prior:=false
-                            %   (en hardware solo 'adaptive' y 'fixed')
+ctrl_mode   = 'adaptive';   % 'adaptive' = nodo con adaptive:=true (por defecto)
+                            % 'fixed'    = nodo con adaptive:=false
 
 test_num    = 1;            % Identificador del ensayo (test_num usado al lanzar el nodo)
+
+with_load   = false;        % true = con carga en el efector final (Actividad 3)
+
+% Escalas de la planta en Gazebo (config/control/sim_init_config.yaml) usadas
+% al generar el ensayo. Solo en modo 'sim': definen los valores verdaderos de
+% los parametros (lineas de referencia de la Figura 6) y se muestran en los
+% titulos si alguna es distinta de 1.0.
+mass_inertia_scale = 1.0;   % alpha1..3 verdadero
+damping_scale      = 1.0;   % Fv1 verdadero = damping_scale * Fv1 nominal
+friction_scale     = 1.0;   % Fc verdadero  = friction_scale * Fc nominal
 
 EXPORT_FIGS = false;        % true  = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
                             % false = solo visualizar
@@ -51,22 +60,13 @@ TAU_MAX     = 1.2;          % [N·m] limite de torque (debe coincidir con el nod
 T_TRANS_S   = 3.0;          % [s] transicion quintica de los nodos gz y hw (debe
                             % coincidir); se descartan las muestras t < T_TRANS_S
 
-% Escalas de la PLANTA usadas en config/control/sim_init_config.yaml al generar
-% este ensayo (solo simulacion): definen los valores verdaderos de los
-% parametros (lineas de referencia de la Figura 6) y se muestran en los titulos
-% si alguna es distinta de 1.0:
-MASS_SCALE_TRUE     = 1.0;  % mass_inertia_scale -> alpha1..3 verdadero
-DAMPING_SCALE_TRUE  = 1.0;  % damping_scale      -> Fv1 verdadero = escala*FV_NOM(1)
-FRICTION_SCALE_TRUE = 1.0;  % friction_scale     -> Fc verdadero = escala*FC_NOM
+T_METRICS_LOAD = 20.0;      % [s] con with_load = true, las metricas se calculan
+                            % desde este tiempo de seguimiento (sin carga, desde 0)
 
-% Carga VERDADERA en el efector (theta_load = exceso inercial del link5):
-%   sin carga (spawn_load: false)            -> [0, 0, 0, 0]
-%   cilindro 125 g Ø38x13 (sostenido por su  -> [0.125, 0.0158, 0, 0]
-%   diametro, offset 0, sim_init_config.yaml)
-%   (dm [kg], d(m·c) [kg·m] en el frame de joint4; EE a 126 mm de joint4:
-%    dmcx = load_mass * (0.126 + load_x_offset)). Con mass_inertia_scale = s,
-%   link5 suma dm = (s-1)*0.2216 kg y dmcx = (s-1)*0.0139 kg·m.
-LOAD_TRUE = [0, 0, 0, 0];
+% Carga del efector: load_mass y load_x_offset de sim_init_config.yaml (en el
+% robot real se usa la misma masa)
+LOAD_MASS     = 0.125;      % [kg]
+LOAD_X_OFFSET = 0.0;        % [m]
 
 % Directorio raiz del paquete ROS 2
 pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   % raiz del paquete (relativa a este script)
@@ -75,6 +75,20 @@ pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   %
 % escala 1.0 y la que usa el nodo como prior en simulacion)
 [FV_NOM, FC_NOM] = read_motor_friction( ...
     fullfile(pkg_dir, 'config', 'control', 'motorXM430W350T_params.yaml'));
+
+% Valores verdaderos de theta_load = [dm, dmcx, dmcy, dmcz] (exceso inercial
+% del link5 en el frame de joint4; el efector esta a 126 mm de joint4):
+%   carga:              dm = LOAD_MASS,         dmcx = LOAD_MASS*(0.126 + LOAD_X_OFFSET)
+%   mass_inertia_scale: dm = (s - 1)*0.2216 kg, dmcx = (s - 1)*0.0139 kg·m (solo sim)
+% En hardware la linea de la carga es solo la referencia de la masa agregada:
+% theta_load tambien absorbe el error del modelo sin carga.
+theta_load_true = zeros(1, 4);
+if with_load
+    theta_load_true = theta_load_true + LOAD_MASS * [1, 0.126 + LOAD_X_OFFSET, 0, 0];
+end
+if strcmp(mode, 'sim')
+    theta_load_true = theta_load_true + (mass_inertia_scale - 1) * [0.2216, 0.0139, 0, 0];
+end
 
 %% ── Rutas dinamicas ──────────────────────────────────────────────────────────
 switch mode
@@ -128,11 +142,24 @@ fc_hat   = [T.fc1_hat, T.fc2_hat,  T.fc3_hat,  T.fc4_hat];
 
 e_q    = q - q_des;
 
+% Ventana de las metricas: con carga se descarta la primera parte del
+% seguimiento, en la que el MRAC todavia esta aprendiendo la carga
+if with_load
+    t_metrics = T_METRICS_LOAD;
+else
+    t_metrics = 0.0;
+end
+mm = t >= t_metrics;
+if nnz(mm) < 2
+    error('El ensayo dura %.1f s de seguimiento: no alcanza t_metrics = %.1f s.', ...
+          t(end), t_metrics);
+end
+
 % Valores verdaderos de la friccion: en simulacion, escala de la planta por el
 % nominal; en hardware los parametros de friccion son residuales (nominal 0)
 if strcmp(mode, 'sim')
-    FV1_TRUE = DAMPING_SCALE_TRUE * FV_NOM(1);
-    FC_TRUE  = FRICTION_SCALE_TRUE * FC_NOM;
+    FV1_TRUE = damping_scale * FV_NOM(1);
+    FC_TRUE  = friction_scale * FC_NOM;
 else
     FV1_TRUE = 0;
     FC_TRUE  = zeros(1, 4);
@@ -142,28 +169,34 @@ end
 fprintf('\n%s\n', repmat('═', 1, 88));
 fprintf(' Metricas MRAC articular 12p  [%s | modo=%s | test=%d]\n', ...
         mode_label, ctrl_mode, test_num);
+fprintf(' Ventana: t = %.1f a %.1f s de seguimiento\n', t_metrics, t(end));
 fprintf('%s\n', repmat('═', 1, 88));
 fprintf('%-6s  %-12s  %-12s  %-14s  %-14s  %-10s  %-10s\n', ...
         'Joint', 'e_max[rad]', 'e_RMS[rad]', 'max|tau|[N·m]', 'tau_RMS[N·m]', 'Sat[%]', 'TV(tau)');
 fprintf('%s\n', repmat('-', 1, 88));
 for i = 1:4
-    e_max_i   = max(abs(e_q(:,i)));
-    e_rms_i   = sqrt(mean(e_q(:,i).^2));
-    tau_max_i = max(abs(tau(:,i)));
-    tau_rms_i = sqrt(mean(tau(:,i).^2));
-    sat_pct_i = 100 * mean(sat(:,i));
-    tv_i      = sum(abs(diff(tau(:,i))));
+    e_max_i   = max(abs(e_q(mm,i)));
+    e_rms_i   = sqrt(mean(e_q(mm,i).^2));
+    tau_max_i = max(abs(tau(mm,i)));
+    tau_rms_i = sqrt(mean(tau(mm,i).^2));
+    sat_pct_i = 100 * mean(sat(mm,i));
+    tv_i      = sum(abs(diff(tau(mm,i))));
     fprintf('q%-5d  %12.5f  %12.5f  %14.4f  %14.4f  %10.2f  %10.4f\n', ...
             i, e_max_i, e_rms_i, tau_max_i, tau_rms_i, sat_pct_i, tv_i);
 end
 fprintf('%s\n', repmat('-', 1, 88));
 fprintf(' Parametros estimados finales (verdadero entre parentesis):\n');
 fprintf('   alpha = [%.3f %.3f %.3f]                     (%.2f)\n', ...
-        a_hat(end,1), a_hat(end,2), a_hat(end,3), MASS_SCALE_TRUE);
+        a_hat(end,1), a_hat(end,2), a_hat(end,3), mass_inertia_scale);
 fprintf('   carga = dm=%.3f kg  dmc=[%.4f %.4f %.4f] kg·m\n', ...
         load_hat(end,1), load_hat(end,2), load_hat(end,3), load_hat(end,4));
-fprintf('           (verdad: dm=%.3f, dmc=[%.4f %.4f %.4f])\n', ...
-        LOAD_TRUE(1), LOAD_TRUE(2), LOAD_TRUE(3), LOAD_TRUE(4));
+if strcmp(mode, 'sim')
+    load_ref_txt = 'verdad';
+else
+    load_ref_txt = 'carga agregada';   % theta_load tambien absorbe el error del modelo
+end
+fprintf('           (%s: dm=%.3f, dmc=[%.4f %.4f %.4f])\n', load_ref_txt, ...
+        theta_load_true(1), theta_load_true(2), theta_load_true(3), theta_load_true(4));
 fprintf('   Fv1   = %.4f N·m·s/rad                       (%.4f)\n', ...
         fv1_hat(end), FV1_TRUE);
 fprintf('   Fc    = [%.4f %.4f %.4f %.4f] N·m\n', ...
@@ -184,21 +217,19 @@ jointNames = {'Articulacion 1', 'Articulacion 2', ...
 xlims      = [t(1), t(end)];
 
 % Etiqueta del modo para los titulos
-mode_tex = struct('adaptive',         'adaptativo', ...
-                  'fixed',            'no adaptativo', ...
-                  'adaptive_noprior', 'adaptativo, sin prior de friccion', ...
-                  'fixed_noprior',    'no adaptativo, sin prior de friccion');
+mode_tex = struct('adaptive', 'adaptativo', ...
+                  'fixed',    'no adaptativo');
 if isfield(mode_tex, ctrl_mode)
     ctrl_label = mode_tex.(ctrl_mode);
 else
     ctrl_label = ctrl_mode;
 end
 cfg_items = {ctrl_label};
-scales = [MASS_SCALE_TRUE, DAMPING_SCALE_TRUE, FRICTION_SCALE_TRUE];
+scales = [mass_inertia_scale, damping_scale, friction_scale];
 if strcmp(mode, 'sim') && any(scales ~= 1.0)
     cfg_items{end+1} = sprintf('masa x%g, amort. x%g, fricc. x%g', scales);
 end
-if LOAD_TRUE(1) > 0
+if with_load
     cfg_items{end+1} = 'con carga';
 else
     cfg_items{end+1} = 'sin carga';
@@ -241,6 +272,10 @@ for i = 1:4
     plot(t, e_q(:,i), '-', 'Color', color_meas, 'LineWidth', lw); hold on;
     yline(0, ':', 'LineWidth', 0.9, 'Color', [0.5 0.5 0.5]);
     xlabel('Tiempo [s]', 'FontSize', fs);
+    if t_metrics > 0
+        xline(t_metrics, '--', 'Color', [0.5 0.5 0.5], 'LineWidth', 0.9, ...
+              'Label', 'inicio de metricas', 'HandleVisibility', 'off');
+    end
     ylabel(sprintf('$e_{q_%d}$ [rad]', i), 'Interpreter', 'latex', 'FontSize', fs);
     title(jointNames{i}, 'FontSize', fs_title - 2);
     grid on; box on;
@@ -332,9 +367,9 @@ h_a = gobjects(1, 3);
 for i = 1:3
     h_a(i) = plot(t, a_hat(:,i), '-', 'Color', c_tau(i,:), 'LineWidth', lw); hold on;
 end
-if strcmp(mode, 'sim') && MASS_SCALE_TRUE ~= 1.0
-    yline(MASS_SCALE_TRUE, '--k', 'LineWidth', 1.0, ...
-          'Label', sprintf('planta real (%.2f)', MASS_SCALE_TRUE));
+if strcmp(mode, 'sim') && mass_inertia_scale ~= 1.0
+    yline(mass_inertia_scale, '--k', 'LineWidth', 1.0, ...
+          'Label', sprintf('planta real (%.2f)', mass_inertia_scale));
 end
 yline(1.0, ':', 'LineWidth', 0.9, 'Color', [0.5 0.5 0.5], 'Label', 'nominal (1.0)');
 xlabel('Tiempo [s]', 'FontSize', fs);
@@ -348,14 +383,14 @@ grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
 nexttile(tl6);
 yyaxis left;
 h_dm = plot(t, load_hat(:,1), '-', 'Color', c_tau(1,:), 'LineWidth', lw); hold on;
-yline(LOAD_TRUE(1), '--', 'Color', c_tau(1,:), 'LineWidth', 0.9);
+yline(theta_load_true(1), '--', 'Color', c_tau(1,:), 'LineWidth', 0.9);
 ylabel('$\Delta\hat{m}$ [kg]', 'Interpreter', 'latex', 'FontSize', fs);
 set(gca, 'YColor', c_tau(1,:));
 yyaxis right;
 h_mc = gobjects(1, 3);
 for i = 1:3
     h_mc(i) = plot(t, load_hat(:,i+1), '-', 'Color', c_tau(i+1,:), 'LineWidth', lw); hold on;
-    yline(LOAD_TRUE(i+1), '--', 'Color', c_tau(i+1,:), 'LineWidth', 0.9);
+    yline(theta_load_true(i+1), '--', 'Color', c_tau(i+1,:), 'LineWidth', 0.9);
 end
 ylabel('$\Delta\widehat{m c}$ [kg$\cdot$m]', 'Interpreter', 'latex', 'FontSize', fs);
 set(gca, 'YColor', [0.3 0.3 0.3]);

@@ -30,7 +30,10 @@
 %   y los parametros finales de los ensayos MRAC. Se calculan solo en el
 %   seguimiento (se descarta la transicion inicial) y en la ventana de tiempo
 %   comun a todos los ensayos, para que TV(tau), que crece con la duracion,
-%   sea comparable.
+%   sea comparable. Con with_load = true (Actividad 3, t_run de 40 s) las
+%   metricas se calculan desde T_METRICS_LOAD s de seguimiento: en la primera
+%   parte el MRAC todavia esta aprendiendo la carga. Las graficas muestran el
+%   ensayo completo.
 %
 % Configurar la seccion "Configuracion" y ejecutar.
 
@@ -41,6 +44,8 @@ comparison  = 'act1_adapt_sim';   % 'act1_adapt_sim' | 'act1_adapt_real' |
                                 % 'act2_smc_sim' | 'act2_smc_real' |
                                 % 'act3_smc_sim' | 'act3_smc_real' | 'custom'
 
+with_load   = false;       % true = ensayos con carga en el efector (Actividad 3)
+
 EXPORT_FIGS = false;       % true = guardar PNG (300 dpi) y EPS vectorial (600 dpi)
 
 TAU_MAX     = 1.2;         % [N·m] limite de torque (debe coincidir con los nodos)
@@ -48,6 +53,10 @@ TAU_MAX     = 1.2;         % [N·m] limite de torque (debe coincidir con los nod
 % Duracion de la transicion inicial de los nodos [s] (T_TRANS de los nodos
 % SMC y MRAC); esas muestras se descartan
 T_START     = 3.0;
+
+% Con with_load = true, las metricas se calculan desde este tiempo de
+% seguimiento [s] (sin carga, desde 0)
+T_METRICS_LOAD = 20.0;
 
 % test_num de cada ensayo (el usado al lanzar el nodo)
 % act1_adapt_sim
@@ -71,7 +80,7 @@ test_num_real3_mrac    = 3;   % MRAC adaptativo, con carga
 
 % Tabla de ensayos de cada comparacion. Una fila por ensayo:
 %   etiqueta | controlador 'mrac'|'smc'|'fl' | modo 'sim'|'real' |
-%   variante: MRAC 'adaptive'|'fixed'|'adaptive_noprior'|'fixed_noprior',
+%   variante: MRAC 'adaptive'|'fixed',
 %             SMC  'sat'|'sign' (la funcion del CSV), FL '' | test_num
 switch comparison
     case 'act1_adapt_sim'
@@ -230,6 +239,22 @@ for k = 2:n_cases
     end
 end
 
+% Ventana de las metricas: con carga se descarta la primera parte del
+% seguimiento, en la que el MRAC todavia esta aprendiendo la carga
+if startsWith(comparison, 'act3') ~= with_load
+    warning('comparison = ''%s'' con with_load = %d: la Actividad 3 es la de carga.', ...
+            comparison, with_load);
+end
+if with_load
+    t_metrics = T_METRICS_LOAD;
+else
+    t_metrics = 0.0;
+end
+if t_end <= t_metrics
+    error('Los ensayos duran %.1f s de seguimiento: no alcanzan t_metrics = %.1f s.', ...
+          t_end, t_metrics);
+end
+
 %% ── Metricas comparativas ────────────────────────────────────────────────────
 modes = unique(cases(:, 3));
 if numel(modes) > 1
@@ -244,23 +269,26 @@ else
 end
 
 fprintf('\n%s\n', repmat('═', 1, 88));
-fprintf(' Comparacion articular — %s  [%s]  (seguimiento: %.1f s)\n', ...
-        comp_title, mode_label, t_end);
+fprintf(' Comparacion articular — %s  [%s]\n', comp_title, mode_label);
+fprintf(' Metricas en t = %.1f a %.1f s de seguimiento\n', t_metrics, t_end);
 fprintf('%s\n', repmat('═', 1, 88));
 for k = 1:n_cases
-    sat_k = abs(data(k).tau) >= 0.99 * TAU_MAX;   % criterio de la guia
+    mk    = data(k).t >= t_metrics;
+    e_k   = data(k).e_q(mk, :);
+    tau_k = data(k).tau(mk, :);
+    sat_k = abs(tau_k) >= 0.99 * TAU_MAX;   % criterio de la guia
     fprintf('\n  %s  (%s, test=%d)\n', data(k).label, upper(data(k).ctrl), data(k).test);
     fprintf('  %-6s  %-12s  %-12s  %-14s  %-14s  %-8s  %-10s\n', ...
             'Joint','e_max[rad]','e_RMS[rad]','max|tau|[N·m]','tau_RMS[N·m]','Sat[%]','TV(tau)');
     fprintf('  %s\n', repmat('-', 1, 84));
     for i = 1:4
         fprintf('  q%-5d  %12.5f  %12.5f  %14.4f  %14.4f  %8.2f  %10.4f\n', i, ...
-                max(abs(data(k).e_q(:,i))), sqrt(mean(data(k).e_q(:,i).^2)), ...
-                max(abs(data(k).tau(:,i))), sqrt(mean(data(k).tau(:,i).^2)), ...
-                100 * mean(sat_k(:,i)), sum(abs(diff(data(k).tau(:,i)))));
+                max(abs(e_k(:,i))), sqrt(mean(e_k(:,i).^2)), ...
+                max(abs(tau_k(:,i))), sqrt(mean(tau_k(:,i).^2)), ...
+                100 * mean(sat_k(:,i)), sum(abs(diff(tau_k(:,i)))));
     end
     if data(k).z_on
-        fprintf('  z media [rad/s2] = [%.2f %.2f %.2f %.2f]\n', mean(data(k).z));
+        fprintf('  z media [rad/s2] = [%.2f %.2f %.2f %.2f]\n', mean(data(k).z(mk, :)));
     end
     if strcmp(data(k).ctrl, 'mrac')
         p_end = data(k).par(end, :);
@@ -273,8 +301,9 @@ end
 fprintf('\n  Resumen e_RMS [mrad]\n');
 fprintf('  %-24s %9s %9s %9s %9s\n', 'Ensayo', 'q1', 'q2', 'q3', 'q4');
 for k = 1:n_cases
+    mk = data(k).t >= t_metrics;
     fprintf('  %-24s %9.2f %9.2f %9.2f %9.2f\n', data(k).label, ...
-            1e3 * sqrt(mean(data(k).e_q.^2, 1)));
+            1e3 * sqrt(mean(data(k).e_q(mk, :).^2, 1)));
 end
 fprintf('%s\n\n', repmat('═', 1, 88));
 
@@ -283,6 +312,7 @@ sty.lw       = 1.5;
 sty.fs       = 11;
 sty.fs_title = 14;
 sty.t_end    = t_end;
+sty.t_mark   = 0;           % sin linea de inicio de metricas (solo en la de errores)
 sty.ref      = [0.4 0.4 0.4];   % gris — referencia
 palette = [0.0000 0.4470 0.7410;    % azul
            0.8500 0.3250 0.0980;    % naranja
@@ -304,8 +334,10 @@ z_k       = find([data.z_on]);
 %% ── Figuras ──────────────────────────────────────────────────────────────────
 comp_figure(1, [50 620 1100 580], data, all_k, 'q', ...
     @(i) sprintf('$q_%d$ [rad]', i), title_str, sty, 'q_des', ref_match, []);
+sty_e        = sty;
+sty_e.t_mark = t_metrics;
 comp_figure(2, [70 390 1100 580], data, all_k, 'e_q', ...
-    @(i) sprintf('$e_{q_%d}$ [rad]', i), [title_str '  — Errores'], sty, '', true, []);
+    @(i) sprintf('$e_{q_%d}$ [rad]', i), [title_str '  — Errores'], sty_e, '', true, []);
 comp_figure(3, [90 160 1100 580], data, all_k, 'tau', ...
     @(i) sprintf('$\\tau_%d\\;[\\mathrm{N{\\cdot}m}]$', i), [title_str '  — Torques'], ...
     sty, '', true, TAU_MAX);
@@ -347,7 +379,8 @@ function comp_figure(fig_num, pos, data, idx, field, ylab, ttl, sty, ref_field, 
 % Figura 2x2 (una celda por articulacion) con los ensayos idx superpuestos.
 % ref_field: campo de referencia a graficar ('' = ninguna). Si las referencias
 % no coinciden se grafica la de cada ensayo, punteada y en su color.
-% tau_max: dibuja los limites de torque ([] = no).
+% tau_max: dibuja los limites de torque ([] = no). sty.t_mark > 0 dibuja una
+% linea vertical en ese tiempo (inicio de las metricas).
     figure(fig_num); clf;
     set(gcf, 'Color', 'w', 'Position', pos);
     tl = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
@@ -364,6 +397,10 @@ function comp_figure(fig_num, pos, data, idx, field, ylab, ttl, sty, ref_field, 
         if ~isempty(tau_max)
             yline( tau_max, '--k', 'LineWidth', 1.0, 'Label', sprintf('+%.1f N·m', tau_max));
             yline(-tau_max, '--k', 'LineWidth', 1.0, 'Label', sprintf('\x2212%.1f N·m', tau_max));
+        end
+        if sty.t_mark > 0
+            xline(sty.t_mark, '--', 'Color', [0.5 0.5 0.5], 'LineWidth', 0.9, ...
+                  'Label', 'inicio de metricas', 'HandleVisibility', 'off');
         end
         if ~isempty(ref_field)
             if ref_match

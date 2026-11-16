@@ -19,9 +19,16 @@
 //                  Cerrar el gripper sobre la carga ANTES de correr el nodo.
 //      Fv1_res, Fc_res: friccion RESIDUAL (desviacion respecto a la
 //                  identificada) en dominio de torque, nominal 0
-//    El regresor Y (4x12), el prior a_prior, las tasas Gamma, la fuga sigma,
-//    las cotas, la zona muerta y la compuerta de la adaptacion ya estan
+//    El prior a_prior, la fuga sigma, las cotas, la zona muerta, la compuerta
+//    de la adaptacion y las columnas de la carga en el regresor ya estan
 //    implementados.
+//
+//  Torque nominal (forma del SMC en hardware; sin friccion, que la compensa
+//  el modelo torque→corriente):
+//    tau_nom = M(q)*ddq_r + Phi(q,dq),   Phi(q,dq) = C(q,dq)*dq + g(q)
+//  Regresor Y (4x12), en el orden de a_hat: la dinamica es lineal en los
+//  parametros, y Y*(a - a_prior) es el cambio del torque cuando los
+//  parametros pasan de a_prior a a.
 //
 //  Realimentacion escalada por diag(M) (solo en hardware):
 //    tau = M(q)*ddq_r + Phi(q,dq) + Y*(a_hat - a_prior) - diag(M(q))*a_rob
@@ -35,8 +42,8 @@
 //    de torque o corriente, o error mayor a ADAPT_EMAX) ya estan implementados.
 //    Con adaptive:=false, a_hat queda en a_prior.
 //
-//  Funcion de conmutacion (aplicada elemento a elemento):
-//    "sat"   ->  rho(s) = sat(s / phi)        phi: capa limite [rad/s]
+//  Funcion de conmutacion (aplicada elemento a elemento; ya implementada):
+//    rho(s) = sat(s / phi)        phi: capa limite PHI [rad/s]
 //
 //  Transicion inicial: quintica de duracion T_TRANS desde la pose medida al
 //  arrancar hasta q_d(0), empalmando posicion, velocidad y aceleracion. El
@@ -98,11 +105,15 @@
 //  ──────────────────────────────────────────────────────────────────────────
 //  SECCIONES A COMPLETAR:
 //    [1] Trayectoria articular de referencia  →  desiredTrajectory()
-//    [2] Funcion de conmutacion               →  rho_scalar(), PHI
-//    [3] Ganancias MRAC                       →  LAMBDA_Q, K_V, K_S
+//    [2] Modelo nominal y regresor            →  nominalTorque(), regressor()
+//    [3] Ganancias MRAC y tasas Gamma         →  LAMBDA_Q, K_V, K_S, PHI, GAMMA_*
 //    [4] Ley de control y adaptacion          →  compute_torque(), update_parameters()
+//  Al arrancar, antes de abrir el puerto, el nodo verifica la SECCION 2 contra
+//  la dinamica de Pinocchio y se detiene con un informe por bloque si algo no
+//  coincide.
 // ============================================================================
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -123,6 +134,7 @@
 #include "omx/initial_pose.hpp"
 #include "omx/joint_return.hpp"
 #include "omx/motor_model.hpp"
+#include "omx/mrac_check.hpp"
 #include "omx/robot_model.hpp"
 #include "omx/ros_utils.hpp"
 #include "omx/trajectory.hpp"
@@ -175,27 +187,48 @@ static constexpr int IDX_FV1   = 7;   // [7]     Fv1 residual
 static constexpr int IDX_FC    = 8;   // [8..11] Fc1..Fc4 residual
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  [SECCION 3] GANANCIAS MRAC — COMPLETAR
+//  [SECCION 3] GANANCIAS MRAC Y TASAS DE ADAPTACION — COMPLETAR
 //  Ajustar los valores para cada articulacion [joint1, joint2, joint3, joint4]
 //
-//  Rangos recomendados (lazo de 200 Hz, Ts = 5 ms; con PHI = 0.3):
+//  Rangos recomendados (lazo de 200 Hz, Ts = 5 ms):
 //    LAMBDA_Q : 15 – 45   [1/s]     (ancho de banda de la superficie)
 //    K_V      : 10 – 60             (alcance exponencial; proporcional a s)
 //    K_S      : 1  – 8    [rad/s²]  (ganancia de conmutacion)
+//    PHI      : 0.2 – 0.5 [rad/s]   (capa limite de sat, comun a las 4 articulaciones)
+//
+//  Tasas de adaptacion Gamma, una por bloque de parametros (todas > 0). En el
+//  robot son mas bajas que en Gazebo: la adaptacion promedia sobre el ciclo y
+//  estima la componente lenta. Con el doble del limite superior en todos los
+//  bloques, J4 oscila.
+//    GAMMA_ALPHA : 0.1   – 0.3     (alpha1..alpha3)
+//    GAMMA_DM    : 0.02  – 0.06    (dm, masa de la carga)
+//    GAMMA_MC    : 0.001 – 0.003   (dmcx, dmcy, dmcz, primer momento de la carga)
+//    GAMMA_FV    : 0.2   – 0.6     (Fv1 residual)
+//    GAMMA_FC    : 0.2   – 0.6     (Fc1..Fc4 residuales)
+//  El parametro gamma_scale multiplica todas las tasas sin recompilar.
 //
 // ═══════════════════════════════════════════════════════════════════════════
 static const Vec4 LAMBDA_Q = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
 static const Vec4 K_V      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
 static const Vec4 K_S      = (Vec4() << 0.0, 0.0, 0.0, 0.0).finished();  // COMPLETAR
+static const double PHI    = 0.0;                                         // COMPLETAR [rad/s]
+
+static const double GAMMA_ALPHA = 0.0;   // COMPLETAR
+static const double GAMMA_DM    = 0.0;   // COMPLETAR
+static const double GAMMA_MC    = 0.0;   // COMPLETAR
+static const double GAMMA_FV    = 0.0;   // COMPLETAR
+static const double GAMMA_FC    = 0.0;   // COMPLETAR
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Tasas de adaptacion, fuga sigma hacia el prior [1/s] y cotas de los
-// parametros, por bloque [alpha1..3, dm, dmcx, dmcy, dmcz, Fv1, Fc1..4]
-// (no modificar). En hardware las tasas son ~4x mas frias que en Gazebo:
-// la adaptacion promedia sobre el ciclo y estima la componente lenta.
+// Tasas de adaptacion por parametro, en el orden de a_hat (no modificar)
 static const Vec12 GAMMA =
-  (Vec12() << 0.25, 0.25, 0.25,   0.05, 0.0025, 0.0025, 0.0025,   0.5,   0.5, 0.5, 0.5, 0.5).finished();
+  (Vec12() << GAMMA_ALPHA, GAMMA_ALPHA, GAMMA_ALPHA,
+              GAMMA_DM, GAMMA_MC, GAMMA_MC, GAMMA_MC,
+              GAMMA_FV,
+              GAMMA_FC, GAMMA_FC, GAMMA_FC, GAMMA_FC).finished();
 
+// Fuga sigma hacia el prior [1/s] y cotas de los parametros, por bloque
+// [alpha1..3, dm, dmcx, dmcy, dmcz, Fv1, Fc1..4] (no modificar)
 static const Vec12 SIGMA_LEAK =
   (Vec12() << 0.1, 0.1, 0.1,   0.02, 0.02, 0.02, 0.02,   0.1,   0.1, 0.1, 0.1, 0.1).finished();
 
@@ -250,21 +283,12 @@ static Reference desiredTrajectory(double t)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  [SECCION 2] Funcion de conmutacion — COMPLETAR
-//
-//  Implementar la saturacion:
-//    sat  : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite)
-//
-//  Definir tambien PHI, la capa limite que el nodo pasa como phi a sat:
-//    PHI : 0.2 – 0.5 [rad/s], comun a las 4 articulaciones.
+//  Funcion de conmutacion (no modificar):
+//    sat : rho(s) = clamp(s / phi, -1, 1)        (phi: capa limite PHI)
 // ─────────────────────────────────────────────────────────────────────────────
-static const double PHI = 0.0;   // COMPLETAR [rad/s]
-
 static double rho_scalar(double s, double phi)
 {
-  (void)s; (void)phi;
-
-  return 0.0;  // COMPLETAR: sat(s/phi) = clamp(s/phi, -1, 1)
+  return std::max(-1.0, std::min(1.0, s / phi));
 }
 
 // Aplica rho_scalar elemento a elemento sobre el vector s (no modificar)
@@ -317,12 +341,19 @@ public:
     loop_rate_hz_ = std::min(std::max(get_parameter("loop_rate_hz").as_double(), 50.0), 400.0);
     Ts_ = 1.0 / loop_rate_hz_;
 
-    // PHI se completa en la SECCION 2: sat(s/PHI) necesita PHI > 0. Se
-    // verifica antes de abrir el puerto y habilitar torque.
+    // PHI y Gamma se completan en la SECCION 3: sat(s/PHI) necesita PHI > 0 y
+    // la adaptacion necesita Gamma > 0. Se verifica antes de abrir el puerto y
+    // habilitar torque.
     if (!(PHI > 0.0)) {
       RCLCPP_FATAL(get_logger(),
-        "PHI = %.3f: completar PHI > 0 en la SECCION 2 (capa limite de sat)", PHI);
+        "PHI = %.3f: completar PHI > 0 en la SECCION 3 (capa limite de sat)", PHI);
       throw std::runtime_error("PHI sin completar");
+    }
+    if (adaptive_ && !(GAMMA.minCoeff() > 0.0)) {
+      RCLCPP_FATAL(get_logger(),
+        "Gamma sin completar: GAMMA_ALPHA, GAMMA_DM, GAMMA_MC, GAMMA_FV y GAMMA_FC "
+        "deben ser > 0 en la SECCION 3 (o ejecutar con adaptive:=false)");
+      throw std::runtime_error("Gamma sin completar");
     }
 
     // Prior: alphas en 1, carga y friccion residual en 0 (no modificar).
@@ -374,6 +405,9 @@ public:
     }
     RCLCPP_INFO(get_logger(), "Pinocchio: nv=%d", model_.nv());
 
+    // Autoverificacion de la SECCION 2 antes de abrir el puerto (no modificar)
+    check_model();
+
     // ── Publisher de monitoreo ────────────────────────────────────────────────
     js_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/hw/joint_states", 10);
 
@@ -424,28 +458,86 @@ public:
   }
 
 private:
-  // ─────────────────────────────────────────────────────────────────────────
-  //  Regresor 4x12: columnas alpha (bloques de 10 parametros de link2..link4
-  //  contraidos con sus valores nominales), theta_load (columnas [m, m*c] del
-  //  bloque de link5), Fv1 (dq1 filtrada) y Fc (tanh(dq_d/eps) por junta).
-  // ─────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  [SECCION 2] Modelo nominal y regresor — COMPLETAR
+  //  Argumentos: q, dq (dq filtrada), dqr, ddqr (referencias de Slotine-Li) y
+  //  tanh_dqd = tanh(dq_d/eps) (4x1, Coulomb con la velocidad deseada).
+  //  Al arrancar, check_model() compara estas funciones con la dinamica de
+  //  Pinocchio y detiene el nodo si algun bloque no coincide.
+  // ═══════════════════════════════════════════════════════════════════════════
 
+  // 2.1 Torque nominal en hardware (sin friccion):
+  //     tau_nom = M(q)*ddq_r + Phi(q,dq)
+  Vec4 nominalTorque(const Vec4& q, const Vec4& dq, const Vec4& ddqr)
+  {
+    // Modelo nominal del URDF (no modificar)
+    const Eigen::Matrix4d M = model_.massMatrix(q);           // M(q)
+    const Vec4 nle = model_.nonlinearEffects(q, dq);           // Phi(q,dq) = C(q,dq)*dq + g(q)
+
+    // COMPLETAR
+    const Vec4 tau_nom = Vec4::Zero();
+
+    // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
+    (void)M; (void)nle; (void)ddqr;
+    return tau_nom;
+  }
+
+  // Regresor 4x12: columnas en el orden de a_hat
+  //   [alpha1..3 | dm, dmcx, dmcy, dmcz | Fv1 | Fc1..4]
   MatY regressor(const Vec4& q, const Vec4& dq, const Vec4& dqr, const Vec4& ddqr,
                  const Vec4& tanh_dqd)
   {
+    // Regresor de Pinocchio por cuerpo (no modificar): para el cuerpo movido
+    // por joint(k+1), k = 0..3, su aporte al torque es Y_body[k]*pi_k, con
+    // pi_k (10x1) = [m, m*cx, m*cy, m*cz, Ixx, Ixy, Iyy, Ixz, Iyz, Izz].
+    // pi_nom_[k] tiene los valores nominales de pi_k (URDF).
     const Eigen::MatrixXd Y_SL = model_.slotineLiRegressor(q, dq, dqr, ddqr);
+    std::array<Eigen::Matrix<double, NUM_JOINTS, 10>, NUM_JOINTS> Y_body;
+    for (int k = 0; k < NUM_JOINTS; ++k) {
+      Y_body[k] = Y_SL.block(0, 10 * (jid_[k] - 1), NUM_JOINTS, 10);
+    }
     MatY Y = MatY::Zero();
-    for (int i = 0; i < 3; ++i) {
-      const int col0 = 10 * (static_cast<int>(jid_[i]) - 1);
-      Y.col(IDX_ALPHA + i) = (Y_SL.middleCols(col0, 10) * pi_nom_[i]).head<NUM_JOINTS>();
-    }
-    const int col0_load = 10 * (static_cast<int>(jid_[3]) - 1);
-    Y.block<NUM_JOINTS, 4>(0, IDX_LOAD) = Y_SL.block(0, col0_load, NUM_JOINTS, 4);
-    Y(0, IDX_FV1) = dq(0);
-    for (int i = 0; i < NUM_JOINTS; ++i) {
-      Y(i, IDX_FC + i) = tanh_dqd(i);
-    }
+
+    // Columnas de la carga theta_load = [dm, dmcx, dmcy, dmcz] (no modificar):
+    // la carga suma masa y primer momento al ultimo cuerpo (k = 3)
+    Y.block<NUM_JOINTS, 4>(0, IDX_LOAD) = Y_body[3].leftCols<4>();
+
+    // 2.2 Columnas de alpha1..alpha3 (cuerpos k = 0..2): alpha_k escala todos
+    //     los parametros del cuerpo, pi_k = alpha_k*pi_nom_[k]
+    //     Y.col(IDX_ALPHA + k) = ...
+    // COMPLETAR
+
+    // 2.3 Columna de Fv1 (friccion viscosa residual de joint1: Fv1*dq1)
+    //     Y(0, IDX_FV1) = ...
+    // COMPLETAR
+
+    // 2.4 Columnas de Fc1..Fc4 (Coulomb residual de cada articulacion:
+    //     Fc_j*tanh(dq_d,j/eps))
+    //     Y(j, IDX_FC + j) = ...
+    // COMPLETAR
+
+    // Suprimir warnings mientras la seccion esta incompleta (eliminar al completarla):
+    (void)dq; (void)tanh_dqd;
     return Y;
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Autoverificacion de la SECCION 2 (no modificar): compara nominalTorque() y
+  // regressor() con la dinamica de Pinocchio en estados de prueba
+  void check_model()
+  {
+    const auto res = omx::checkMrac12p(
+      model_, jid_, omx::MracNominal::Rnea, Vec4::Zero(), Vec4::Zero(),
+      [this](const Vec4& q, const Vec4& dq, const Vec4&, const Vec4& ddqr,
+             const Vec4&) { return nominalTorque(q, dq, ddqr); },
+      [this](const Vec4& q, const Vec4& dq, const Vec4& dqr, const Vec4& ddqr,
+             const Vec4& th) { return regressor(q, dq, dqr, ddqr, th); });
+    if (!res.ok) {
+      RCLCPP_FATAL(get_logger(),
+        "Autoverificacion de la SECCION 2 (modelo nominal y regresor):\n%s", res.report.c_str());
+      throw std::runtime_error("SECCION 2 incompleta o incorrecta");
+    }
+    RCLCPP_INFO(get_logger(), "Autoverificacion de la SECCION 2 (modelo nominal y regresor): OK");
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -479,11 +571,11 @@ private:
     const Vec4 dqr  = Vec4::Zero();
     const Vec4 ddqr = Vec4::Zero();
 
-    // Dinamica nominal y regresor (infraestructura, no modificar):
-    //   M (4x4), tau_nom = M*ddq_r + Phi(q,dq) (RNEA), Y (4x12)
+    // Torque nominal y regresor de la SECCION 2, y M (infraestructura, no modificar):
+    //   M (4x4), tau_nom (4x1), Y_out (4x12)
     const Vec4 tanh_dqd = ((ref.dq / hw_.motor.epsilon).array().tanh()).matrix();
     const Eigen::Matrix4d M = model_.massMatrix(q);
-    const Vec4 tau_nom = model_.inverseDynamics(q, dq, ddqr);
+    const Vec4 tau_nom = nominalTorque(q, dq, ddqr);
     Y_out = regressor(q, dq, dqr, ddqr, tanh_dqd);
 
     // 4.2 Funcion de conmutacion: rho = rho_vec(s_q, ...)

@@ -44,6 +44,9 @@ public:
   Mat4 massMatrix(const Vec4 & q);                                         // M(q)
   Vec4 nonlinearEffects(const Vec4 & q, const Vec4 & dq);                  // n(q,dq) = C(q,dq)·dq + g(q)
   Vec4 gravity(const Vec4 & q);                                            // g(q)
+  // C(q,dq) de los simbolos de Christoffel: C·dq + g = n(q,dq), M' − 2C antisimetrica,
+  // y C·dq_r es el termino de slotineLiTorque y de slotineLiRegressor
+  Mat4 coriolisMatrix(const Vec4 & q, const Vec4 & dq);
   Vec4 inverseDynamics(const Vec4 & q, const Vec4 & dq, const Vec4 & ddq); // M·ddq + C·dq + g (RNEA)
 
   Eigen::Vector3d eePosition(const Vec4 & q);

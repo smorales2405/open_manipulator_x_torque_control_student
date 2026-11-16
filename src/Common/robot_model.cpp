@@ -86,6 +86,27 @@ Vec4 RobotModel::gravity(const Vec4 & q)
   return pinocchio::computeGeneralizedGravity(m.model, m.data, m.full(q)).head<NUM_JOINTS>();
 }
 
+Mat4 RobotModel::coriolisMatrix(const Vec4 & q, const Vec4 & dq)
+{
+  // Polarizacion de h(v) = C(q,v)·v = rnea(q, v, 0) − g: la forma bilineal
+  // simetrica h(a, b) = C(q,a)·b de Christoffel, columna a columna con b = e_j
+  // (la misma C que slotineLiTorque)
+  auto & m = *impl_;
+  const Eigen::VectorXd qf = m.full(q), dqf = m.full(dq);
+  const Eigen::VectorXd zero = Eigen::VectorXd::Zero(m.model.nv);
+  const Eigen::VectorXd g    = pinocchio::rnea(m.model, m.data, qf, zero, zero);
+  const Eigen::VectorXd r_dq = pinocchio::rnea(m.model, m.data, qf, dqf,  zero);
+  Mat4 C;
+  for (int j = 0; j < NUM_JOINTS; ++j) {
+    Eigen::VectorXd ej = zero;
+    ej[j] = 1.0;
+    const Eigen::VectorXd r_sum = pinocchio::rnea(m.model, m.data, qf, dqf + ej, zero);
+    const Eigen::VectorXd r_ej  = pinocchio::rnea(m.model, m.data, qf, ej,       zero);
+    C.col(j) = 0.5 * (r_sum - r_dq - r_ej + g).head<NUM_JOINTS>();
+  }
+  return C;
+}
+
 Vec4 RobotModel::inverseDynamics(const Vec4 & q, const Vec4 & dq, const Vec4 & ddq)
 {
   auto & m = *impl_;
