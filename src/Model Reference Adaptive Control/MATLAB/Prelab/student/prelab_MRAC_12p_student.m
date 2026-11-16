@@ -293,7 +293,7 @@ for i_ley = 1:numel(LEYES)
             dqr  = zeros(4,1);   % COMPLETAR
             ddqr = zeros(4,1);   % COMPLETAR
 
-            % M, torque nominal y regresor de la SECCION 2 (infraestructura, no modificar)
+            % M, torque nominal y regresor de la SECCION 2 (no modificar)
             th      = tanh(dqd / F_EPS);
             M       = OMDyn(q, dq);
             tau_nom = tau_nominal(q, dq, dqr, ddqr, th, P);
@@ -318,7 +318,7 @@ for i_ley = 1:numel(LEYES)
                 a_hat = min(max(a_hat + Ts*a_dot, A_MIN), A_MAX);
             end
         else
-            % ── SMC con integral (identico a gz_SMC_joint_node con integral:=true)
+            % ── SMC con integral
             [M, phib] = OMDyn(q, dq);
             e_q  = q  - qd;
             e_dq = dq - dqd;
@@ -381,7 +381,7 @@ for i_ley = 1:numel(LEYES)
 
     fprintf('Simulacion %s completada (%.1f s).\n\n', NOMBRE.(ley), T_SIM);
 
-    % Verificacion de limites articulares del URDF (Gazebo los impone; aqui se avisa)
+    % Verificacion de limites articulares del URDF
     for i = 1:4
         if any(Q(:,i) < Q_LOWER(i)) || any(Q(:,i) > Q_UPPER(i))
             warning('%s: q%d salio de los limites del URDF [%.3f, %.3f] rad.', ...
@@ -831,7 +831,7 @@ function [M, C, g] = modelo_nominal(q, dq)
     end
 end
 
-% ── Regresor de Slotine-Li por cuerpo (equivalente al de Pinocchio) ───────────
+% ── Regresor de Slotine-Li por cuerpo ───────────
 % Yb(:,:,k) (4x10): tau = sum_k Yb(:,:,k)*pi_k para
 % tau = M(q)*ddq_r + C(q,dq)*dq_r + g(q). Polarizacion del regresor de RNEA:
 %   Y_SL = R(q,0,ddq_r) + (R(q,dq+dq_r,0) - R(q,dq,0) - R(q,dq_r,0) + R(q,0,0))/2
