@@ -17,33 +17,7 @@
 %       Fv1        : friccion viscosa de joint1 [N·m·s/rad]
 %       Fc_j       : friccion de Coulomb de joint j [N·m]
 %
-%   Referencias de Slotine-Li:
-%     e_q  = q - q_d,          e_dq  = dq - dq_d,        s = e_dq + Lambda.*e_q
-%     dq_r = dq_d - Lambda.*e_q,   ddq_r = ddq_d - Lambda.*e_dq
-%
-%   Torque nominal de Slotine-Li con la friccion nominal:
-%     tau_nom = M(q)*ddq_r + C(q,dq)*dq_r + g(q) + Fv0.*dq + Fc0.*tanh(dq_d/eps)
-%   Regresor Y (4x12), en el orden de a_hat: la dinamica es lineal en los
-%   parametros, y Y*(a - a_prior) es el cambio de tau_nom cuando los parametros
-%   pasan de a_prior a a.
-%
-%   Ley de control:
-%     tau     = tau_nom + Y*(a_hat - a_prior) - M(q)*(K_V.*s + K_S.*sat(s/PHI))
-%     tau_sat = clamp(tau, -TAU_MAX, TAU_MAX)
-%   Ley de adaptacion (con fuga sigma hacia el prior):
-%     a_hat_dot = -Gamma.*(Y'*s + sigma.*(a_hat - a_prior))
-%   integrada con Euler a 200 Hz, proyectada a [A_MIN, A_MAX] y congelada en
-%   los ticks en que el torque satura (anti-windup), como en el nodo. El MRAC
-%   fijo (adaptive:=false en el nodo) mantiene a_hat = a_prior: es el SMC sin
-%   integral con la friccion nominal.
-%
-%   SMC con integral (Actividad 2; gz_SMC_joint_node.cpp con integral:=true):
-%     dz/dt = K_I.*s,  |z| <= Z_MAX, congelado si el tick anterior saturo
-%     v     = ddq_d - Lambda.*e_dq - K_V.*s - K_S.*sat(s/PHI) - z
-%     tau   = M(q)*v + phib(q,dq) + Fv0.*dq + Fc0.*tanh(dq_d/eps)
-%
-%   Planta simulada (el papel de Gazebo), con las escalas de
-%   config/control/sim_init_config.yaml:
+%   Planta simulada:
 %     ms*M(q)*ddq + ms*phib(q,dq) + ds*Fv.*dq + fs*Fc.*tanh(dq/eps_plant) = tau_sat
 %   integrada con RK4 a Ts/N_SUB con ZOH del torque. Los controladores usan
 %   siempre el modelo nominal (ms = ds = fs = 1).
@@ -52,16 +26,13 @@
 %   50 % mayores que las nominales que conoce el controlador):
 %     ACTIVIDAD = 1 : MRAC fijo vs MRAC adaptativo
 %     ACTIVIDAD = 2 : SMC con integral vs MRAC adaptativo
-%   La masa no cambia: alpha y theta_load deben quedarse en su valor nominal
-%   (1 y 0), mientras Fv1 y Fc suben hacia 1.5 veces el nominal.
 %
-%   Referencia: sinusoide articular (w = 1 rad/s), identica al nodo. Sin
+%   Referencia: sinusoide articular (w = 1 rad/s). Sin
 %   transicion: la planta parte en q_des(0) y en reposo, y las metricas
 %   excluyen t < T_REG (fase de alcance).
 %
 %   Al arrancar se verifica la SECCION 2 (torque nominal y regresor) contra la
-%   dinamica rigida de los cuerpos con parametros perturbados, como la
-%   autoverificacion del nodo.
+%   dinamica rigida de los cuerpos con parametros perturbados.
 %
 % Visualizacion 3D del MRAC adaptativo (cadena del URDF + STLs de meshes/):
 %   ANIM_MODE = 'post' — simula todo el horizonte y luego anima con
@@ -72,8 +43,8 @@
 %   ANIM_MODE = 'off'  — sin animacion.
 %
 % Figuras comparativas: posiciones, errores, torques y superficies de las dos
-% leyes de la actividad, parametros estimados del MRAC adaptativo y, en la
-% Actividad 2, el termino integral del SMC. Metricas en consola.
+% leyes de la actividad y parametros estimados del MRAC adaptativo. Metricas
+% en consola.
 %
 % CARPETA AUTOCONTENIDA (portable): copiar esta carpeta completa a cualquier
 % maquina y ejecutar el script desde ahi. Contenido:
@@ -113,7 +84,6 @@ friction_scale     = 1.5;   % factor sobre la friccion de Coulomb Fc
 
 % ═══════════════════════════════════════════════════════════════════════════
 %  SECCION 3 — GANANCIAS MRAC Y TASAS DE ADAPTACION  (COMPLETAR)
-%  Las mismas de gz_MRAC_joint_12p_node_student.cpp.
 %  Indice de cada elemento: [joint1, joint2, joint3, joint4]
 %
 %  Rangos recomendados (lazo discreto a 200 Hz, Ts = 5 ms):
@@ -128,8 +98,6 @@ friction_scale     = 1.5;   % factor sobre la friccion de Coulomb Fc
 %    GAMMA_MC    : 0.001 – 0.005   (dmcx, dmcy, dmcz, primer momento de la carga)
 %    GAMMA_FV    : 0.5   – 3.0     (Fv1)
 %    GAMMA_FC    : 0.5   – 2.0     (Fc1..Fc4)
-%  Con Gamma baja los parametros convergen lento; con Gamma alta el torque
-%  oscila y los parametros van de una cota a la otra.
 % ═══════════════════════════════════════════════════════════════════════════
 LAMBDA_Q = [0.0; 0.0; 0.0; 0.0];   % COMPLETAR
 K_V      = [0.0; 0.0; 0.0; 0.0];   % COMPLETAR
@@ -168,9 +136,8 @@ Ts      = 1/200;       % [s] periodo del lazo de control (200 Hz, como el nodo)
 T_REG   = 1.0;         % [s] ventana excluida de las metricas: fase de alcance
                        %     (el robot parte en reposo y dq_des(0) ~= 0)
 
-% Friccion articular nominal (valores asumidos para el prelab, como en
-% prelab_SMC.m). La planta la simula escalada (como Gazebo con el <dynamics>
-% del URDF) y los controladores la usan sin escalar: es el prior del MRAC y
+% Friccion articular nominal. La planta la simula escalada
+% y los controladores la usan sin escalar: es el prior del MRAC y
 % el feedforward del SMC.
 Fv = 0.02 * ones(4,1);   % Damping Friction [N·m·s/rad] igual en las 4 articulaciones
 Fc = 0.05 * ones(4,1);   % Coulomb Friction [N·m] igual en las 4 articulaciones
@@ -180,7 +147,7 @@ N_SUB     = 100;    % subpasos RK4 por tick (h = Ts/N_SUB = 0.05 ms): el Coulomb
                     % de la planta es rigido cerca de dq = 0 (ver prelab_SMC.m)
 
 % Fuga sigma hacia el prior [1/s] y cotas de los parametros, por bloque
-% [alpha1..3, dm, dmcx, dmcy, dmcz, Fv1, Fc1..4] (las del nodo)
+% [alpha1..3, dm, dmcx, dmcy, dmcz, Fv1, Fc1..4] 
 SIGMA_LEAK = [0.1; 0.1; 0.1;   0.02; 0.02; 0.02; 0.02;   0.1;   0.1; 0.1; 0.1; 0.1];
 A_MIN      = [0.80; 0.80; 0.80;   -0.02; -0.005; -0.010; -0.005;   0.0;   0.0; 0.0; 0.0; 0.0];
 A_MAX      = [1.25; 1.25; 1.25;    0.20;  0.035;  0.010;  0.020;   0.15;  0.30; 0.30; 0.30; 0.30];
@@ -296,7 +263,7 @@ for i_ley = 1:numel(LEYES)
     live     = strcmp(ANIM_MODE, 'live') && adaptive;
 
     Q  = zeros(Nsim+1, 4); DQ = zeros(Nsim+1, 4); TAU = zeros(Nsim+1, 4);
-    S  = zeros(Nsim+1, 4); AH = zeros(Nsim+1, 12); Z = zeros(Nsim+1, 4);
+    S  = zeros(Nsim+1, 4); AH = zeros(Nsim+1, 12);
 
     x        = [q0; dq0];
     a_hat    = a_prior;       % estimacion de los parametros (MRAC)
@@ -364,7 +331,6 @@ for i_ley = 1:numel(LEYES)
             tau = M*v_q + phib + Fv.*dq + Fc.*tanh(dqd / F_EPS);   % friccion despues de la ley
             tau_sat  = min(max(tau, -TAU_MAX), TAU_MAX);
             sat_prev = any(abs(tau) >= TAU_MAX);
-            Z(k,:)   = z';
         end
 
         % ── Registro (columnas del CSV del nodo) ──────────────────────────
@@ -406,7 +372,6 @@ for i_ley = 1:numel(LEYES)
     DQ(Nsim+1,:)  = x(5:8)';
     TAU(Nsim+1,:) = TAU(Nsim,:);
     AH(Nsim+1,:)  = a_hat';
-    Z(Nsim+1,:)   = Z(Nsim,:);
     if strcmp(ley, 'SMC_I')
         lam = LAMBDA_SMC;
     else
@@ -424,7 +389,7 @@ for i_ley = 1:numel(LEYES)
         end
     end
 
-    LOG.(ley) = struct('Q', Q, 'DQ', DQ, 'TAU', TAU, 'S', S, 'AH', AH, 'Z', Z);
+    LOG.(ley) = struct('Q', Q, 'DQ', DQ, 'TAU', TAU, 'S', S, 'AH', AH);
 end
 
 %% ── Metricas (sin la fase de alcance) ────────────────────────────────────────
@@ -670,29 +635,11 @@ grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
 title(tl, sprintf('[%s] Parametros estimados del MRAC adaptativo', mode_label), ...
       'FontSize', 14, 'FontWeight', 'bold');
 
-% ── Figura 6 — Termino integral del SMC (Actividad 2) ────────────────────────
-if ACTIVIDAD == 2
-    figure(6); clf;
-    set(gcf, 'Color', 'w', 'Position', [200 200 1100 600]);
-    tl = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
-    for i = 1:4
-        nexttile(tl);
-        plot(t_log, LOG.SMC_I.Z(:,i), '-', 'Color', colors(1,:), 'LineWidth', lw); hold on;
-        yline(0, ':', 'LineWidth', 0.8);
-        xlabel('Tiempo [s]', 'FontSize', fs);
-        ylabel(sprintf('$z_%d$ [rad/s$^2$]', i), 'Interpreter', 'latex', 'FontSize', fs);
-        title(jointNames{i}, 'FontSize', fs_title);
-        grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
-    end
-    title(tl, sprintf('[%s] Termino integral del SMC', mode_label), ...
-          'FontSize', 14, 'FontWeight', 'bold');
-end
-
 %% ── Exportacion ──────────────────────────────────────────────────────────────
 if EXPORT_FIGS
     output_dir = fullfile(this_dir, 'plots', sprintf('act%d', ACTIVIDAD));
     if ~exist(output_dir, 'dir'), mkdir(output_dir); end
-    fnames = {'q_tracking', 'q_error', 'torques', 'surfaces', 'params', 'integral'};
+    fnames = {'q_tracking', 'q_error', 'torques', 'surfaces', 'params'};
     for f = 1:numel(fnames)
         if ishghandle(f)
             exportgraphics(figure(f), fullfile(output_dir, [fnames{f} '.png']), 'Resolution', 300);
