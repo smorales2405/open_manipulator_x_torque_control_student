@@ -22,7 +22,12 @@
 %   Figura 2 — Error de seguimiento articular         e_q1..e_q4
 %   Figura 3 — Torques de control                     tau1..tau4
 %   Figura 4 — Superficies                            s1..s4
-%   Figura 5 — Friccion de Coulomb estimada Fc_i      (solo ensayos MRAC adaptativos)
+%   Figura 5 — Parametros estimados (2x2): alpha_hat, theta_load_hat
+%               (dm/dmc en ejes izq/der), Fv1_hat, Fc_hat, como la Figura 6 de
+%               plots_MRAC_joint.m (solo ensayos MRAC adaptativos). Lineas de
+%               referencia en los valores VERDADEROS de la planta: escalas y
+%               carga de la seccion "Configuracion" y friccion nominal de
+%               config/control/motorXM430W350T_params.yaml.
 %
 %   Metricas reportadas en consola por ensayo y articulacion:
 %     e_max [rad]  |  e_RMS [rad]  |  max|tau| [N·m]  |  tau_RMS [N·m]  |  Sat [%]  |  TV(tau)
@@ -56,6 +61,19 @@ T_START     = 3.0;
 % Con with_load = true, las metricas se calculan desde este tiempo de
 % seguimiento [s] (sin carga, desde 0)
 T_METRICS_LOAD = 20.0;
+
+% Escalas de la planta en Gazebo (config/control/sim_init_config.yaml) usadas
+% en los ensayos de simulacion (Actividad 2: 1.0 / 1.5 / 1.5). Definen los
+% valores verdaderos de los parametros (lineas de referencia de la Figura 5);
+% no aplican a la implementacion.
+mass_inertia_scale = 1.0;   % alpha1..3 verdadero
+damping_scale      = 1.0;   % Fv1 verdadero = damping_scale * Fv1 nominal
+friction_scale     = 1.0;   % Fc verdadero  = friction_scale * Fc nominal
+
+% Carga del efector (with_load = true): load_mass y load_x_offset de
+% sim_init_config.yaml (en el robot real se usa la misma masa)
+LOAD_MASS     = 0.125;      % [kg]
+LOAD_X_OFFSET = 0.0;        % [m]
 
 % test_num de cada ensayo (el usado al lanzar el nodo)
 % act1_adapt_sim
@@ -131,6 +149,11 @@ end
 % Directorio raiz del paquete ROS 2
 pkg_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));   % raiz del paquete (relativa a este script)
 
+% Friccion nominal identificada en dominio de torque (la que simula Gazebo a
+% escala 1.0 y la que usa el nodo como prior en simulacion)
+[FV_NOM, FC_NOM] = read_motor_friction( ...
+    fullfile(pkg_dir, 'config', 'control', 'motorXM430W350T_params.yaml'));
+
 %% ── Carga de datos ───────────────────────────────────────────────────────────
 n_cases  = size(cases, 1);
 node_pre = struct('sim', 'gz', 'real', 'hw');
@@ -188,7 +211,9 @@ for k = 1:n_cases
     d.z_on = any(d.z(:) ~= 0);
     if strcmp(ctrl, 'mrac')
         d.fc  = [Tk.fc1_hat, Tk.fc2_hat, Tk.fc3_hat, Tk.fc4_hat];
-        d.par = [Tk.a1_hat, Tk.a2_hat, Tk.a3_hat, Tk.dm_hat, Tk.dmcx_hat, Tk.fv1_hat];
+        % [alpha1..3, dm, dmcx, dmcy, dmcz, Fv1]
+        d.par = [Tk.a1_hat, Tk.a2_hat, Tk.a3_hat, ...
+                 Tk.dm_hat, Tk.dmcx_hat, Tk.dmcy_hat, Tk.dmcz_hat, Tk.fv1_hat];
         d.adapt_on = startsWith(variant, 'adaptive');
     else
         d.fc  = zeros(height(Tk), 4);
@@ -293,7 +318,7 @@ for k = 1:n_cases
         p_end = data(k).par(end, :);
         fprintf(['  parametros finales: alpha = [%.3f %.3f %.3f]  dm = %.3f kg  ' ...
                  'dmcx = %.4f kg·m  Fv1 = %.4f  Fc = [%.4f %.4f %.4f %.4f]\n'], ...
-                p_end(1:3), p_end(4), p_end(5), p_end(6), data(k).fc(end, :));
+                p_end(1:3), p_end(4), p_end(5), p_end(8), data(k).fc(end, :));
     end
 end
 
@@ -327,7 +352,36 @@ sty.colors = palette;
 title_str = sprintf('Comparacion articular — %s  [%s]', comp_title, mode_label);
 all_k     = 1:n_cases;
 s_k       = find(arrayfun(@(d) ~isempty(d.s), data));
-fc_k      = find([data.adapt_on]);
+par_k     = find([data.adapt_on]);
+
+% Valores verdaderos de los parametros (lineas de referencia de la Figura 5).
+% Simulacion: escalas de la planta y carga. Implementacion: la friccion
+% adaptada es residual (nominal 0) y la linea de la carga es solo la masa
+% agregada (theta_load tambien absorbe el error del modelo sin carga). Si se
+% mezclan ensayos de simulacion e implementacion no se dibujan.
+par_ref = struct('alpha', [], 'load', [], 'fv1', [], 'fc', []);
+par_modes = unique({data(par_k).mode});
+if isscalar(par_modes)
+    par_ref.load = zeros(1, 4);
+    if with_load
+        par_ref.load = LOAD_MASS * [1, 0.126 + LOAD_X_OFFSET, 0, 0];
+    end
+    if strcmp(par_modes{1}, 'sim')
+        par_ref.alpha = mass_inertia_scale;
+        par_ref.load  = par_ref.load + (mass_inertia_scale - 1) * [0.2216, 0.0139, 0, 0];
+        par_ref.fv1   = damping_scale * FV_NOM(1);
+        par_ref.fc    = friction_scale * FC_NOM;
+    else
+        par_ref.fv1   = 0;
+        par_ref.fc    = zeros(1, 4);
+    end
+end
+if strcmp(comparison, 'act2_smc_sim') && ...
+        all([mass_inertia_scale, damping_scale, friction_scale] == 1.0)
+    warning(['comparison = ''act2_smc_sim'' con las escalas en 1.0: ajustar ' ...
+             'mass_inertia_scale, damping_scale y friction_scale a las del ensayo ' ...
+             '(lineas de referencia de la Figura 5).']);
+end
 
 %% ── Figuras ──────────────────────────────────────────────────────────────────
 comp_figure(1, [50 620 1100 580], data, all_k, 'q', ...
@@ -344,10 +398,9 @@ if ~isempty(s_k)
         @(i) sprintf('$s_{%d}$ [rad/s]', i), [title_str '  — Superficies'], ...
         sty, '', true, []);
 end
-if ~isempty(fc_k)
-    comp_figure(5, [130 -320 1100 580], data, fc_k, 'fc', ...
-        @(i) sprintf('$\\hat{F}_{c,%d}$ [N$\\cdot$m]', i), ...
-        [title_str '  — Friccion de Coulomb estimada (MRAC)'], sty, '', true, []);
+if ~isempty(par_k)
+    param_figure(5, [130 -320 1250 720], data, par_k, par_ref, ...
+        [title_str '  — Parametros estimados (MRAC)'], sty);
 end
 
 %% ── Exportacion ──────────────────────────────────────────────────────────────
@@ -356,7 +409,7 @@ if EXPORT_FIGS
     if ~exist(output_dir, 'dir'); mkdir(output_dir); end
 
     fnames = {'plot_comp_q_tracking', 'plot_comp_q_error', 'plot_comp_torques', ...
-              'plot_comp_surfaces',   'plot_comp_fc_hat'};
+              'plot_comp_surfaces',   'plot_comp_params'};
     for f = 1:numel(fnames)
         if ishghandle(f)
             exportgraphics(figure(f), fullfile(output_dir, [fnames{f} '.png']), 'Resolution', 300);
@@ -434,4 +487,148 @@ function comp_figure(fig_num, pos, data, idx, field, ylab, ttl, sty, ref_field, 
                  'Orientation', 'horizontal', 'FontSize', sty.fs, 'Interpreter', 'tex');
     lgd.Layout.Tile = 'north';
     title(tl, ttl, 'FontSize', sty.fs_title, 'FontWeight', 'bold');
+end
+
+function param_figure(fig_num, pos, data, idx, ref, ttl, sty)
+% Parametros estimados de los ensayos MRAC idx en 2x2, como la Figura 6 de
+% plots_MRAC_joint.m: un color por parametro y lineas discontinuas en los
+% valores verdaderos (ref; campos vacios = sin linea). Si hay varios ensayos,
+% cada uno usa un estilo de linea (indicado en el titulo).
+    figure(fig_num); clf;
+    set(gcf, 'Color', 'w', 'Position', pos);
+    tl = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+    fs     = sty.fs;
+    lw     = sty.lw;
+    c_par  = lines(4);                    % un color distintivo por parametro
+    styles = {'-', '-.', ':'};            % un estilo por ensayo ('--' = verdadero)
+    st     = @(n) styles{mod(n - 1, numel(styles)) + 1};
+    xlims  = [0, sty.t_end];
+
+    % (1) Escala de inercia estimada (alpha1..3)
+    nexttile(tl);
+    h_a = gobjects(1, 3);
+    for n = 1:numel(idx)
+        d = data(idx(n));
+        for i = 1:3
+            h = plot(d.t, d.par(:,i), st(n), 'Color', c_par(i,:), 'LineWidth', lw); hold on;
+            if n == 1; h_a(i) = h; end
+        end
+    end
+    if ~isempty(ref.alpha) && ref.alpha ~= 1.0
+        yline(ref.alpha, '--k', 'LineWidth', 1.0, ...
+              'Label', sprintf('planta real (%.2f)', ref.alpha));
+    end
+    yline(1.0, ':', 'LineWidth', 0.9, 'Color', [0.5 0.5 0.5], 'Label', 'nominal (1.0)');
+    xlabel('Tiempo [s]', 'FontSize', fs);
+    ylabel('$\hat{\alpha}_k$', 'Interpreter', 'latex', 'FontSize', fs);
+    title('Escala de inercia estimada (links proximales)', 'FontSize', sty.fs_title - 2);
+    legend(h_a, {'$\hat{\alpha}_1$', '$\hat{\alpha}_2$', '$\hat{\alpha}_3$'}, ...
+           'Interpreter', 'latex', 'Location', 'best', 'FontSize', fs);
+    grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
+
+    % (2) Carga estimada en el efector — dm en eje izquierdo, d(m·c) en el derecho
+    nexttile(tl);
+    yyaxis left;
+    for n = 1:numel(idx)
+        d = data(idx(n));
+        h = plot(d.t, d.par(:,4), st(n), 'Color', c_par(1,:), 'LineWidth', lw); hold on;
+        if n == 1; h_dm = h; end
+    end
+    if ~isempty(ref.load)
+        yline(ref.load(1), '--', 'Color', c_par(1,:), 'LineWidth', 0.9);
+    end
+    ylabel('$\Delta\hat{m}$ [kg]', 'Interpreter', 'latex', 'FontSize', fs);
+    set(gca, 'YColor', c_par(1,:));
+    yyaxis right;
+    h_mc = gobjects(1, 3);
+    for n = 1:numel(idx)
+        d = data(idx(n));
+        for i = 1:3
+            h = plot(d.t, d.par(:,4+i), st(n), 'Color', c_par(i+1,:), 'LineWidth', lw); hold on;
+            if n == 1; h_mc(i) = h; end
+        end
+    end
+    if ~isempty(ref.load)
+        for i = 1:3
+            yline(ref.load(i+1), '--', 'Color', c_par(i+1,:), 'LineWidth', 0.9);
+        end
+    end
+    ylabel('$\Delta\widehat{m c}$ [kg$\cdot$m]', 'Interpreter', 'latex', 'FontSize', fs);
+    set(gca, 'YColor', [0.3 0.3 0.3]);
+    xlabel('Tiempo [s]', 'FontSize', fs);
+    title('Carga estimada en el efector (-- verdadero)', 'FontSize', sty.fs_title - 2);
+    legend([h_dm, h_mc], {'$\Delta\hat{m}$', '$\Delta\widehat{mc}_x$', ...
+           '$\Delta\widehat{mc}_y$', '$\Delta\widehat{mc}_z$'}, ...
+           'Interpreter', 'latex', 'Location', 'best', 'FontSize', fs);
+    grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
+
+    % (3) Friccion viscosa estimada (solo Fv1 se adapta)
+    nexttile(tl);
+    for n = 1:numel(idx)
+        d = data(idx(n));
+        h = plot(d.t, d.par(:,8), st(n), 'Color', c_par(1,:), 'LineWidth', lw); hold on;
+        if n == 1; h_fv = h; end
+    end
+    if ~isempty(ref.fv1)
+        yline(ref.fv1, '--', 'Color', c_par(1,:), 'LineWidth', 0.9);
+    end
+    xlabel('Tiempo [s]', 'FontSize', fs);
+    ylabel('$\hat{F}_{v,1}$ [N$\cdot$m$\cdot$s/rad]', 'Interpreter', 'latex', 'FontSize', fs);
+    title('Friccion viscosa estimada, J1 (-- verdadero)', 'FontSize', sty.fs_title - 2);
+    legend(h_fv, {'$\hat{F}_{v,1}$'}, ...
+           'Interpreter', 'latex', 'Location', 'best', 'FontSize', fs);
+    grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
+
+    % (4) Friccion de Coulomb estimada (Fc1..4)
+    nexttile(tl);
+    h_fc = gobjects(1, 4);
+    for n = 1:numel(idx)
+        d = data(idx(n));
+        for i = 1:4
+            h = plot(d.t, d.fc(:,i), st(n), 'Color', c_par(i,:), 'LineWidth', lw); hold on;
+            if n == 1; h_fc(i) = h; end
+        end
+    end
+    if ~isempty(ref.fc)
+        for i = 1:4
+            yline(ref.fc(i), '--', 'Color', c_par(i,:), 'LineWidth', 0.9);
+        end
+    end
+    xlabel('Tiempo [s]', 'FontSize', fs);
+    ylabel('$\hat{F}_{c,i}$ [N$\cdot$m]', 'Interpreter', 'latex', 'FontSize', fs);
+    title('Friccion de Coulomb estimada (-- verdadero)', 'FontSize', sty.fs_title - 2);
+    legend(h_fc, {'$\hat{F}_{c,1}$', '$\hat{F}_{c,2}$', '$\hat{F}_{c,3}$', '$\hat{F}_{c,4}$'}, ...
+           'Interpreter', 'latex', 'Location', 'best', 'FontSize', fs);
+    grid on; box on; set(gca, 'FontSize', fs); xlim(xlims);
+
+    % Titulo; con varios ensayos, el estilo de linea de cada uno
+    if numel(idx) > 1
+        st_names = {'continua', 'punto-raya', 'punteada'};
+        items = cell(1, numel(idx));
+        for n = 1:numel(idx)
+            items{n} = sprintf('%s: %s', ...
+                st_names{mod(n - 1, numel(st_names)) + 1}, data(idx(n)).label);
+        end
+        ttl = {ttl, strjoin(items, '  |  ')};
+    end
+    title(tl, ttl, 'FontSize', sty.fs_title, 'FontWeight', 'bold');
+end
+
+function [Fv, Fc] = read_motor_friction(yaml_file)
+% Friccion nominal en dominio de torque desde el YAML del motor:
+%   Fv = motor_Fv ./ motor_alpha [N·m·s/rad],   Fc = motor_Fc ./ motor_alpha [N·m]
+    txt   = fileread(yaml_file);
+    alpha = read_vec(txt, 'motor_alpha');
+    Fv    = read_vec(txt, 'motor_Fv') ./ alpha;
+    Fc    = read_vec(txt, 'motor_Fc') ./ alpha;
+end
+
+function v = read_vec(txt, key)
+    tok = regexp(txt, ['\n\s*' key '\s*:\s*\[([^\]]*)\]'], 'tokens', 'once');
+    if isempty(tok)
+        error('No se encontro "%s" en el YAML del motor.', key);
+    end
+    v = str2double(strsplit(strtrim(tok{1}), ','));
+    v = v(:).';
 end
