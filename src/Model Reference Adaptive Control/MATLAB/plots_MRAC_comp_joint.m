@@ -23,7 +23,6 @@
 %   Figura 3 — Torques de control                     tau1..tau4
 %   Figura 4 — Superficies                            s1..s4
 %   Figura 5 — Friccion de Coulomb estimada Fc_i      (solo ensayos MRAC adaptativos)
-%   Figura 6 — Termino integral z1..z4                (solo ensayos SMC con integral)
 %
 %   Metricas reportadas en consola por ensayo y articulacion:
 %     e_max [rad]  |  e_RMS [rad]  |  max|tau| [N·m]  |  tau_RMS [N·m]  |  Sat [%]  |  TV(tau)
@@ -329,7 +328,6 @@ title_str = sprintf('Comparacion articular — %s  [%s]', comp_title, mode_label
 all_k     = 1:n_cases;
 s_k       = find(arrayfun(@(d) ~isempty(d.s), data));
 fc_k      = find([data.adapt_on]);
-z_k       = find([data.z_on]);
 
 %% ── Figuras ──────────────────────────────────────────────────────────────────
 comp_figure(1, [50 620 1100 580], data, all_k, 'q', ...
@@ -351,11 +349,6 @@ if ~isempty(fc_k)
         @(i) sprintf('$\\hat{F}_{c,%d}$ [N$\\cdot$m]', i), ...
         [title_str '  — Friccion de Coulomb estimada (MRAC)'], sty, '', true, []);
 end
-if ~isempty(z_k)
-    comp_figure(6, [150 -560 1100 580], data, z_k, 'z', ...
-        @(i) sprintf('$z_%d$ [rad/s$^2$]', i), [title_str '  — Termino Integral (SMC)'], ...
-        sty, '', true, []);
-end
 
 %% ── Exportacion ──────────────────────────────────────────────────────────────
 if EXPORT_FIGS
@@ -363,7 +356,7 @@ if EXPORT_FIGS
     if ~exist(output_dir, 'dir'); mkdir(output_dir); end
 
     fnames = {'plot_comp_q_tracking', 'plot_comp_q_error', 'plot_comp_torques', ...
-              'plot_comp_surfaces',   'plot_comp_fc_hat',  'plot_comp_integral'};
+              'plot_comp_surfaces',   'plot_comp_fc_hat'};
     for f = 1:numel(fnames)
         if ishghandle(f)
             exportgraphics(figure(f), fullfile(output_dir, [fnames{f} '.png']), 'Resolution', 300);
