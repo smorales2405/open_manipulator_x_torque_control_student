@@ -21,24 +21,11 @@
 //    El prior a_prior, la fuga sigma, las cotas de los parametros y las
 //    columnas de la carga en el regresor ya estan implementados.
 //
-//  Referencias de Slotine-Li:
-//    e_q = q - q_d,   e_dq = dq - dq_d,   s = e_dq + Lambda*e_q
-//    dq_r = dq_d - Lambda*e_q,   ddq_r = ddq_d - Lambda*e_dq
-//
-//  Torque nominal de Slotine-Li con la friccion nominal del URDF:
-//    tau_nom = M(q)*ddq_r + C(q,dq)*dq_r + g(q) + Fv0.*dq + Fc0.*tanh(dq_d/eps)
-//  Regresor Y (4x12), en el orden de a_hat: la dinamica es lineal en los
-//  parametros, y Y*(a - a_prior) es el cambio de tau_nom cuando los
-//  parametros pasan de a_prior a a.
-//  Ley de control:
-//    tau = tau_nom + Y*(a_hat - a_prior) - M(q)*(K_V*s + K_S*rho(s))
-//
-//  Ley de adaptacion: a_hat_dot = -Gamma .* ( Y^T*s + sigma .* (a_hat - a_prior) ).
 //  La integracion, la proyeccion a las cotas y el congelamiento cuando el
 //  torque satura (anti-windup) ya estan implementados. Con adaptive:=false,
 //  a_hat queda en a_prior.
 //
-//  Funcion de conmutacion (aplicada elemento a elemento; ya implementada):
+//  Funcion de conmutacion (aplicada elemento a elemento):
 //    rho(s) = sat(s / phi)        phi: capa limite PHI [rad/s]
 //
 //  Transicion inicial: quintica de duracion T_TRANS desde la pose medida al

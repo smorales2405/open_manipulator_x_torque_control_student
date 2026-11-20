@@ -23,22 +23,11 @@
 //    de la adaptacion y las columnas de la carga en el regresor ya estan
 //    implementados.
 //
-//  Torque nominal (forma del SMC en hardware; sin friccion, que la compensa
-//  el modelo torque→corriente):
-//    tau_nom = M(q)*ddq_r + Phi(q,dq),   Phi(q,dq) = C(q,dq)*dq + g(q)
 //  Regresor Y (4x12), en el orden de a_hat: la dinamica es lineal en los
 //  parametros, y Y*(a - a_prior) es el cambio del torque cuando los
 //  parametros pasan de a_prior a a.
 //
-//  Realimentacion escalada por diag(M) (solo en hardware):
-//    tau = M(q)*ddq_r + Phi(q,dq) + Y*(a_hat - a_prior) - diag(M(q))*a_rob
-//      a_rob : alcance, K_V*s + K_S*rho(s)
-//    Con la M completa la realimentacion de un eje entra a los demas por M_ij;
-//    en el robot eso dejaba pegadas a J3 y J4 en las inversiones.
-//
-//  Ley de adaptacion: a_hat_dot = -Gamma .* ( Y^T*s_dz + sigma .* (a_hat - a_prior) ),
-//    con s_dz = s sin la zona muerta |s| <= adapt_deadzone. La integracion,
-//    la proyeccion a las cotas y el congelamiento (retorno final, saturacion
+//    La integracion, la proyeccion a las cotas y el congelamiento (retorno final, saturacion
 //    de torque o corriente, o error mayor a ADAPT_EMAX) ya estan implementados.
 //    Con adaptive:=false, a_hat queda en a_prior.
 //
